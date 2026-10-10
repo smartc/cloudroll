@@ -1,0 +1,7 @@
+.venv/
+data/
+__pycache__/
+SkyConditions_90640/
+instructions.txt
+*.tmp
+config.json

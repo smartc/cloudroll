@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Frames {{ day }} · {{ title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>{{ day|nicedate }} – Frames</h2>
+  <div class="status">Window {{ window_start.strftime('%a %H:%M') }} → {{ window_end.strftime('%a %H:%M') }} · <span id="count">{{ count }}</span> frames
+    {% if has_timelapse %} · <a href="{{ url_for('timelapse', day=day) }}">Watch timelapse</a>{% endif %}
+    {% if readings %} · <a href="{{ url_for('api_readings_csv', day=day) }}">Readings CSV</a>
+    · <a href="{{ url_for('media_readings', name=readings.name) }}">Raw data</a>{% endif %}</div>
+  <div class="live-wrap"><img id="frame" class="live" alt="Sky frame"></div>
+  <div class="scrub">
+    <button class="tbtn" id="prev">&#9664;</button>
+    <button class="tbtn" id="play">Play</button>
+    <button class="tbtn" id="next">&#9654;</button>
+    <input type="range" id="slider" min="0" max="0" value="0">
+    <span id="ftime">--:--</span>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let frames = [], i = 0, timer = null;
+const img = document.getElementById('frame'), slider = document.getElementById('slider');
+function show(n) {
+  if (!frames.length) return;
+  i = Math.max(0, Math.min(frames.length - 1, n));
+  img.src = frames[i].url;
+  slider.value = i;
+  document.getElementById('ftime').textContent = frames[i].time;
+  history.replaceState(null, '', '#' + frames[i].name);
+  // Preload the next frame so playback stays smooth.
+  if (frames[i + 1]) new Image().src = frames[i + 1].url;
+}
+slider.oninput = () => show(+slider.value);
+document.getElementById('prev').onclick = () => show(i - 1);
+document.getElementById('next').onclick = () => show(i + 1);
+document.getElementById('play').onclick = (e) => {
+  if (timer) { clearInterval(timer); timer = null; e.target.textContent = 'Play'; return; }
+  e.target.textContent = 'Pause';
+  timer = setInterval(() => { if (i >= frames.length - 1) show(0); else show(i + 1); }, 150);
+};
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') show(i - 1);
+  if (e.key === 'ArrowRight') show(i + 1);
+});
+fetch("{{ url_for('api_frames', day=day) }}").then(r => r.json()).then(list => {
+  frames = list;
+  slider.max = frames.length - 1;
+  document.getElementById('count').textContent = frames.length;
+  const want = location.hash.slice(1);
+  const k = frames.findIndex(f => f.name === want);
+  show(k >= 0 ? k : frames.length - 1);
+});
+</script>
+{% endblock %}

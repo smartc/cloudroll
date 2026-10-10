@@ -1,0 +1,12 @@
+  <div class="month-nav">
+    {% if older %}<a class="tbtn" href="{{ url_for(endpoint, month=older) }}">&#9664; {{ older|shortmonth }}</a>{% else %}<span class="tbtn ghost">&#9664;</span>{% endif %}
+    <h2>{{ month|monthname }}</h2>
+    {% if newer %}<a class="tbtn" href="{{ url_for(endpoint, month=newer) }}">{{ newer|shortmonth }} &#9654;</a>{% else %}<span class="tbtn ghost">&#9654;</span>{% endif %}
+  </div>
+  {% if months|length > 1 %}
+  <div class="month-pills">
+    {% for m in months %}
+    <a class="tbtn{% if m == month %} act{% endif %}" href="{{ url_for(endpoint, month=m) }}">{{ m|shortmonth }} <span class="count">{{ counts[m] }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}

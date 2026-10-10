@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Data {{ day }} · {{ title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="month-nav">
+    {% if prev_day %}<a class="tbtn" href="{{ url_for('data_day', day=prev_day) }}">&#9664; {{ prev_day }}</a>{% else %}<span class="tbtn ghost">&#9664;</span>{% endif %}
+    <h2>{{ day|nicedate }}{% if not s.compressed %} <span class="badge" id="open-badge">open</span>{% endif %}</h2>
+    {% if next_day %}<a class="tbtn" href="{{ url_for('data_day', day=next_day) }}">{{ next_day }} &#9654;</a>{% else %}<span class="tbtn ghost">&#9654;</span>{% endif %}
+  </div>
+  <div class="stat-grid">
+    <div class="stat-box"><div class="stat-label">Records</div><div class="stat-value" id="st-records">{{ s.records }}</div></div>
+    <div class="stat-box"><div class="stat-label">Span</div><div class="stat-value" id="st-span">{{ s.first|hm }}–{{ s.last|hm }}</div></div>
+    <div class="stat-box"><div class="stat-label">Avg Cloud</div><div class="stat-value" id="st-cloud">{{ '--' if s.cloud_avg is none else '%.0f %%'|format(s.cloud_avg) }}</div></div>
+    <div class="stat-box"><div class="stat-label">Min Sky Temp</div><div class="stat-value sky-temp" id="st-sky">{{ '--' if s.sky_min is none else '%.1f °C'|format(s.sky_min) }}</div></div>
+    <div class="stat-box"><div class="stat-label">Peak SQM</div><div class="stat-value" id="st-sqm">{{ '--' if s.sqm_max is none else '%.2f'|format(s.sqm_max) }}</div></div>
+    <div class="stat-box"><div class="stat-label">Rain</div><div class="stat-value" id="st-rain">{{ s.rain_records }} min</div></div>
+  </div>
+  <p class="dl-row">
+    <a class="tbtn" href="{{ url_for('api_readings_csv', day=day) }}" title="Readings only, one row per capture">Download CSV</a>
+    <a class="tbtn" href="{{ url_for('api_readings_csv', day=day, grid=1) }}" title="Readings plus the 32×24 temperature grid as columns r00c00…r23c31">CSV + grids</a>
+    <a class="tbtn" href="{{ url_for('media_readings', name=readings.name) }}">Download raw ({{ readings.name.split('.', 1)[1] }}, {{ '%.1f'|format(s.bytes / 1e6) }} MB)</a>
+    {% if has_timelapse %}<a class="tbtn" href="{{ url_for('timelapse', day=day) }}">Watch timelapse</a>{% endif %}
+    <a class="tbtn" href="{{ url_for('data_index') }}">All days</a>
+    <span id="live-status" class="live-status" hidden></span>
+  </p>
+</div>
+
+<div class="data-layout">
+  <div class="charts">
+    <div class="card"><h2>Temperature (°C)</h2><div class="legend" id="leg-temp"></div><div class="chart" id="c-temp" data-h="220"></div></div>
+    <div class="card"><h2>Cloud Cover (%)</h2><div class="chart" id="c-cloud" data-h="150"></div></div>
+    <div class="card"><h2>Sky Brightness (lux, log scale)</h2><div class="chart" id="c-lux" data-h="150"></div></div>
+    <div class="card"><h2>Sky Quality (mag/arcsec²)</h2><div class="chart" id="c-sqm" data-h="150"></div></div>
+    <div class="card"><h2>Pressure (hPa)</h2><div class="chart" id="c-pres" data-h="150"></div></div>
+    <div class="card"><h2>Humidity (%)</h2><div class="chart" id="c-hum" data-h="150"></div></div>
+    <div class="card"><h2>Rain</h2><div class="legend" id="leg-rain"></div><div class="chart" id="c-rain" data-h="56"></div></div>
+  </div>
+
+  <div class="card record" id="record">
+    <h2>Record <span id="rec-time">--:--</span></h2>
+    <div class="rec-nav">
+      <button class="tbtn" id="rec-prev" title="Previous record (←)">&#9664;</button>
+      <span id="rec-pos" class="muted"></span>
+      <button class="tbtn" id="rec-next" title="Next record (→)">&#9654;</button>
+      <a class="tbtn" id="rec-json" href="#" download>Record JSON</a>
+      <a class="tbtn" id="rec-csv" href="#" download title="This record's temperatures as a 24 × 32 grid (°C)">Grid CSV</a>
+    </div>
+    <div class="rec-img"><img id="rec-img" alt="Stored temperature grid"><p id="rec-noimg" class="muted" hidden>No temperature grid stored for this record (captured before raw grids were recorded).</p></div>
+    <table id="rec-table"></table>
+    <p class="muted">Click any chart to pick a record; ← / → step through them. The image is re-rendered from the stored 32×24 grid using the colour scale in effect at capture.</p>
+  </div>
+</div>
+
+<div class="card">
+  <details id="tbl-details">
+    <summary>Table view (all records)</summary>
+    <div class="table-wrap"><table class="data-table" id="all-table"></table></div>
+  </details>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='charts.js') }}"></script>
+<script>
+DataView.init({
+  day: {{ day|tojson }},
+  seriesUrl: {{ url_for('api_readings_series', day=day)|tojson }},
+  recordBase: {{ url_for('api_readings_series', day=day)[:-5]|tojson }},
+  tz: {{ location.tz.key|tojson }},
+  live: {{ (not s.compressed)|tojson }},
+  follow: {{ follow|tojson }},
+  pollSec: {{ poll_sec|tojson }},
+});
+</script>
+{% endblock %}

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ title }}{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<h1>{{ title }} <span class="sub">IR Sky Timelapse</span></h1>
+<div class="nav">
+  <a href="{{ url_for('data_latest') }}" {% if request.endpoint in ('data_latest', 'data_index', 'data_day') %}class="act"{% endif %}>Data</a>
+  <a href="{{ url_for('timelapses') }}" {% if request.endpoint in ('timelapses', 'timelapse', 'day_view') %}class="act"{% endif %}>Timelapses</a>
+  <a href="{{ url_for('live') }}" {% if request.endpoint == 'live' %}class="act"{% endif %}>Live</a>
+  <a href="{{ sensor_url }}" target="_blank" rel="noopener">Sky Sensor &#8599;</a>
+</div>
+{% block content %}{% endblock %}
+<div class="footer">{{ title }} v{{ version }} · {{ location.name }} ({{ '%.4f'|format(location.latitude) }}, {{ '%.4f'|format(location.longitude) }})</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

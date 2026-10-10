@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Data · {{ title }}{% endblock %}
+{% block content %}
+<div class="card">
+  {% if month %}
+  {% include "_month_nav.html" %}
+  {% else %}
+  <h2>Stored Data</h2>
+  {% endif %}
+  {% if summaries %}
+  <div class="table-wrap">
+  <table class="data-table">
+    <tr><th>Day</th><th>Records</th><th>Span</th><th>Avg cloud</th><th>Min sky</th><th>Peak SQM</th><th>Rain</th><th>Size</th><th>Download</th></tr>
+    {% for s in summaries %}
+    <tr>
+      <td><a href="{{ url_for('data_day', day=s.date) }}">{{ s.date|nicedate }}</a>{% if not s.compressed %} <span class="badge">open</span>{% endif %}</td>
+      <td class="num">{{ s.records }}{% if s.with_grid < s.records %} <span class="muted" title="Records that include the raw 32×24 temperature grid">({{ s.with_grid }} grid)</span>{% endif %}</td>
+      <td class="num">{{ s.first|hm }}–{{ s.last|hm }}</td>
+      <td class="num">{{ '--' if s.cloud_avg is none else '%.0f %%'|format(s.cloud_avg) }}</td>
+      <td class="num">{{ '--' if s.sky_min is none else '%.1f °C'|format(s.sky_min) }}</td>
+      <td class="num">{{ '--' if s.sqm_max is none else '%.2f'|format(s.sqm_max) }}</td>
+      <td class="num">{{ s.rain_records }} min</td>
+      <td class="num">{{ '%.1f'|format(s.bytes / 1e6) }} MB</td>
+      <td class="nowrap">
+        <a class="tbtn" href="{{ url_for('api_readings_csv', day=s.date) }}">CSV</a>
+        <a class="tbtn" href="{{ url_for('api_readings_csv', day=s.date, grid=1) }}" title="Readings plus the 32×24 temperature grid as columns r00c00…r23c31">CSV + grids</a>
+        <a class="tbtn" href="{{ url_for('media_readings', name=s.file) }}" title="JSON Lines, one record per capture including the raw 32×24 temperature grid">Raw</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p class="muted">Each day runs sunrise + 1 h to the next sunrise + 1 h. <b>CSV</b> holds the scalar readings; <b>CSV + grids</b> adds the 768 grid temperatures as columns <code>r00c00</code>…<code>r23c31</code> (row, column; row 0 = top of the image); <b>Raw</b> is the full JSON Lines file
+    (<code>{"time", "readings", "color_scale", "ambient", "sky", "pixels": [[32 °C values] × 24]}</code> per line, gzipped once the day closes).</p>
+  {% else %}
+  <p class="muted">No data stored yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

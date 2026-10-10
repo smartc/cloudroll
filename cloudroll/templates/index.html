@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Latest Sky Image</h2>
+  <div class="live-wrap">
+    {% if latest %}
+    <img id="live-img" class="live" src="{{ url_for('media_latest') }}" alt="Latest IR sky image">
+    {% else %}
+    <p class="muted">No captures yet – the first frame will appear within {{ interval }} s.</p>
+    {% endif %}
+  </div>
+  <div id="live-status" class="status">
+    {% if latest %}Captured {{ latest.time|hm }}{% endif %}
+    {% if worker.last_error %} · <span class="err">Last error: {{ worker.last_error }}</span>{% endif %}
+  </div>
+  <div class="status">Current timelapse window: {{ window_start.strftime('%a %H:%M') }} → {{ window_end.strftime('%a %H:%M') }} (sunrise + {{ offset }} min)</div>
+</div>
+
+<div class="card">
+  <h2>Recent Captures</h2>
+  {% if recent %}
+  <div class="thumbs">
+    {% for f in recent %}
+    <a href="{{ url_for('day_view', day=f.day) }}#{{ f.name }}" class="thumb">
+      <img src="{{ url_for('media_frame', day=f.day, name=f.name) }}" loading="lazy" alt="{{ f.time }}">
+      <span>{{ f.time }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="muted">Nothing captured yet.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Latest Timelapses</h2>
+  {% include "_tl_grid.html" %}
+  <p><a href="{{ url_for('timelapses') }}">All timelapses &rarr;</a></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const INTERVAL = {{ interval }} * 1000;
+let lastTime = {{ (latest.time if latest else '')|tojson }};
+async function poll() {
+  try {
+    const r = await fetch("{{ url_for('api_latest') }}", {cache: "no-store"});
+    const j = await r.json();
+    const st = document.getElementById('live-status');
+    if (j.meta && j.meta.time !== lastTime) {
+      if (!lastTime) { location.reload(); return; }
+      lastTime = j.meta.time;
+      document.getElementById('live-img').src = "{{ url_for('media_latest') }}?t=" + Date.now();
+    }
+    if (j.meta) {
+      st.textContent = 'Captured ' + j.meta.time.substr(11, 5);
+      if (j.last_error) {
+        const e = document.createElement('span');
+        e.className = 'err'; e.textContent = ' · Last error: ' + j.last_error;
+        st.appendChild(e);
+      }
+    }
+  } catch (e) { /* server restarting – try again next tick */ }
+}
+setInterval(poll, Math.min(INTERVAL, 30000));
+</script>
+{% endblock %}

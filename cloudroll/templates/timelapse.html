@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ meta.date }} · {{ title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>{{ meta.date|nicedate }}{% if not meta.complete %} <span class="badge">partial</span>{% endif %}</h2>
+  <div class="live-wrap">
+    <video class="live" controls loop playsinline preload="metadata"
+           poster="{{ url_for('media_timelapse', name=meta.date ~ '.jpg') }}"
+           src="{{ url_for('media_timelapse', name=meta.date ~ '.mp4') }}"></video>
+  </div>
+  <div class="speed">
+    Speed:
+    {% for s in [0.25, 0.5, 1, 2, 4] %}
+    <button class="tbtn{% if s == 1 %} act{% endif %}" onclick="setSpeed({{ s }}, this)">{{ s }}×</button>
+    {% endfor %}
+  </div>
+</div>
+<div class="card">
+  <table>
+    <tr><th>Window</th><td>{{ meta.window_start|hm }} → {{ meta.window_end|hm }} (next day)</td></tr>
+    <tr><th>Frames</th><td>{{ meta.frames }} ({{ meta.first_frame|hm }} – {{ meta.last_frame|hm }})</td></tr>
+    <tr><th>Length</th><td>{{ meta.duration_sec }} s at {{ meta.fps }} fps</td></tr>
+    <tr><th>Size</th><td>{{ '%.1f'|format(meta.size_bytes / 1e6) }} MB</td></tr>
+  </table>
+  <p>
+    <a class="tbtn" href="{{ url_for('media_timelapse', name=meta.date ~ '.mp4') }}" download>Download MP4</a>
+    {% if has_frames %}<a class="tbtn" href="{{ url_for('day_view', day=meta.date) }}">Browse frames</a>{% endif %}
+    {% if readings %}
+    <a class="tbtn" href="{{ url_for('api_readings_csv', day=meta.date) }}">Readings CSV</a>
+    <a class="tbtn" href="{{ url_for('media_readings', name=readings.name) }}" title="One JSON record per frame, including the raw 32×24 temperature matrix">Raw data ({{ readings.name.split('.', 1)[1] }})</a>
+    {% endif %}
+  </p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function setSpeed(s, btn) {
+  document.querySelector('video').playbackRate = s;
+  document.querySelectorAll('.speed .tbtn').forEach(b => b.classList.remove('act'));
+  btn.classList.add('act');
+}
+</script>
+{% endblock %}

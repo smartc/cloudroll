@@ -1,0 +1,43 @@
+{
+  "sensor": {
+    "host": "skyconditions.local",
+    "http_port": 80,
+    "alpaca_port": 11111,
+    "websocket_port": 81,
+    "timeout_sec": 8
+  },
+  "location": {
+    "name": "Your Town, Province, Country",
+    "latitude": null,
+    "longitude": null,
+    "timezone": "UTC"
+  },
+  "capture": {
+    "interval_sec": 60,
+    "jpeg_quality": 88
+  },
+  "color_scale": {
+    "mode": "sensor",
+    "fixed_min": -45.0,
+    "fixed_max": 60.0,
+    "clear_delta": 20.0,
+    "overcast_delta": 5.0,
+    "hot_marker": true
+  },
+  "timelapse": {
+    "fps": 24,
+    "crf": 23,
+    "offset_after_sunrise_min": 60
+  },
+  "retention": {
+    "frames_days": 7,
+    "readings_days": 0,
+    "timelapses_days": 0
+  },
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "title": "CloudRoll"
+  },
+  "data_dir": "data"
+}

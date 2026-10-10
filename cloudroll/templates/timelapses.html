@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Timelapses · {{ title }}{% endblock %}
+{% block content %}
+<div class="card">
+  {% if month %}
+  {% include "_month_nav.html" %}
+  {% else %}
+  <h2>Daily Timelapses</h2>
+  {% endif %}
+  {% if month and not timelapses %}
+  <p class="muted">No timelapses in {{ month|monthname }}.</p>
+  {% else %}
+  {% include "_tl_grid.html" %}
+  {% endif %}
+</div>
+{% if pending %}
+<div class="card">
+  <h2>Days Without a Timelapse</h2>
+  <p class="muted">In progress or not yet built. Browse the frames, or build a timelapse of what's been captured so far.</p>
+  <table>
+    <tr><th>Day</th><th>Frames</th><th></th></tr>
+    {% for d in pending %}
+    <tr><td>{{ d|nicedate }}</td>
+        <td><a href="{{ url_for('day_view', day=d) }}">Browse frames</a></td>
+        <td><button class="tbtn" onclick="buildTl('{{ d }}', this)">Build now</button></td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+async function buildTl(day, btn) {
+  btn.disabled = true; btn.textContent = 'Building…';
+  await fetch('/api/build/' + day, {method: 'POST'});
+  // Encoding takes a little while; poll until the video page exists.
+  const t = setInterval(async () => {
+    const r = await fetch('/timelapse/' + day, {method: 'HEAD'});
+    if (r.ok) { clearInterval(t); location.href = '/timelapse/' + day; }
+  }, 5000);
+}
+</script>
+{% endblock %}

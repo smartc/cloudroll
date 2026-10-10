@@ -1,0 +1,16 @@
+# Template – deploy/install.sh fills in @USER@ and @DIR@.
+[Unit]
+Description=CloudRoll IR sky timelapse
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python -m cloudroll run
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
