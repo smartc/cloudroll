@@ -258,6 +258,7 @@ const DataView = (() => {
       tr.append(th, td); return tr;
     }));
     try { history.replaceState(null, '', '#' + i); } catch (e) { /* ignore */ }
+    if (cfg.onSelect) cfg.onSelect(i, D);
   }
 
   function buildTable(force) {

@@ -7,6 +7,7 @@
     {% if has_timelapse %} · <a href="{{ url_for('timelapse', day=day) }}">Watch timelapse</a>{% endif %}
     {% if readings %} · <a href="{{ url_for('api_readings_csv', day=day) }}">Readings CSV</a>
     · <a href="{{ url_for('media_readings', name=readings.name) }}">Raw data</a>{% endif %}</div>
+  {% include "_layout_switch.html" %}
   <div class="live-wrap"><img id="frame" class="live" alt="Sky frame"></div>
   <div class="scrub">
     <button class="tbtn" id="prev">&#9664;</button>
@@ -43,13 +44,17 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') show(i - 1);
   if (e.key === 'ArrowRight') show(i + 1);
 });
-fetch("{{ url_for('api_frames', day=day) }}").then(r => r.json()).then(list => {
-  frames = list;
-  slider.max = frames.length - 1;
-  document.getElementById('count').textContent = frames.length;
-  const want = location.hash.slice(1);
-  const k = frames.findIndex(f => f.name === want);
-  show(k >= 0 ? k : frames.length - 1);
-});
+function load(want) {
+  fetch(CRLayout.url("{{ url_for('api_frames', day=day) }}")).then(r => r.json()).then(list => {
+    frames = list;
+    slider.max = frames.length - 1;
+    document.getElementById('count').textContent = frames.length;
+    const k = frames.findIndex(f => f.name === want);
+    show(k >= 0 ? k : frames.length - 1);
+  });
+}
+// Switching layout keeps the same moment in view.
+CRLayout.onChange(() => load(frames[i] && frames[i].name));
+load(location.hash.slice(1));
 </script>
 {% endblock %}

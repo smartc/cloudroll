@@ -3,10 +3,16 @@
 {% block content %}
 <div class="card">
   <h2>{{ meta.date|nicedate }}{% if not meta.complete %} <span class="badge">partial</span>{% endif %}</h2>
+  {% if tabs|length > 1 %}
+  <div class="layout-switch" role="group" aria-label="Video">
+    <span class="muted">Large image:</span>
+    {% for t in tabs %}<button type="button" class="tbtn{% if loop.first %} act{% endif %}" data-video="{{ loop.index0 }}">{{ t.label }}</button>{% endfor %}
+  </div>
+  {% endif %}
   <div class="live-wrap">
     <video class="live" controls loop playsinline preload="metadata"
-           poster="{{ url_for('media_timelapse', name=meta.date ~ '.jpg') }}"
-           src="{{ url_for('media_timelapse', name=meta.date ~ '.mp4') }}"></video>
+           poster="{{ url_for('media_timelapse', name=tabs[0].jpg) }}"
+           src="{{ url_for('media_timelapse', name=tabs[0].mp4) }}"></video>
   </div>
   <div class="speed">
     Speed:
@@ -20,11 +26,14 @@
     <tr><th>Window</th><td>{{ meta.window_start|hm }} → {{ meta.window_end|hm }} (next day)</td></tr>
     <tr><th>Frames</th><td>{{ meta.frames }} ({{ meta.first_frame|hm }} – {{ meta.last_frame|hm }})</td></tr>
     <tr><th>Length</th><td>{{ meta.duration_sec }} s at {{ meta.fps }} fps</td></tr>
-    <tr><th>Size</th><td>{{ '%.1f'|format(meta.size_bytes / 1e6) }} MB</td></tr>
+    <tr><th>Size</th><td id="tl-size">{{ '%.1f'|format(tabs[0].size_bytes / 1e6) }} MB</td></tr>
   </table>
   <p>
-    <a class="tbtn" href="{{ url_for('media_timelapse', name=meta.date ~ '.mp4') }}" download>Download MP4</a>
+    <a class="tbtn" id="tl-download" href="{{ url_for('media_timelapse', name=tabs[0].mp4) }}" download>Download MP4</a>
     {% if has_frames %}<a class="tbtn" href="{{ url_for('day_view', day=meta.date) }}">Browse frames</a>{% endif %}
+    {% for l in missing %}
+    <button class="tbtn" onclick="buildLayout('{{ l.name }}', this)">Build {{ l.label }} version</button>
+    {% endfor %}
     {% if readings %}
     <a class="tbtn" href="{{ url_for('api_readings_csv', day=meta.date) }}">Readings CSV</a>
     <a class="tbtn" href="{{ url_for('media_readings', name=readings.name) }}" title="One JSON record per frame, including the raw 32×24 temperature matrix">Raw data ({{ readings.name.split('.', 1)[1] }})</a>
@@ -34,10 +43,41 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const VIDEOS = {{ tabs|tojson }};
+const TL_BASE = '/media/timelapses/';
+const video = document.querySelector('video');
+
 function setSpeed(s, btn) {
-  document.querySelector('video').playbackRate = s;
+  video.playbackRate = s;
   document.querySelectorAll('.speed .tbtn').forEach(b => b.classList.remove('act'));
   btn.classList.add('act');
+}
+
+document.querySelectorAll('[data-video]').forEach(btn => btn.addEventListener('click', () => {
+  const v = VIDEOS[+btn.dataset.video];
+  // Carry the position and speed over so both views can be compared.
+  const t = video.currentTime, rate = video.playbackRate, playing = !video.paused;
+  video.poster = TL_BASE + v.jpg;
+  video.src = TL_BASE + v.mp4;
+  video.addEventListener('loadedmetadata', () => {
+    video.currentTime = Math.min(t, video.duration || t);
+    video.playbackRate = rate;
+    if (playing) video.play();
+  }, {once: true});
+  document.getElementById('tl-download').href = TL_BASE + v.mp4;
+  document.getElementById('tl-size').textContent = (v.size_bytes / 1e6).toFixed(1) + ' MB';
+  document.querySelectorAll('[data-video]').forEach(b => b.classList.toggle('act', b === btn));
+}));
+
+async function buildLayout(layout, btn) {
+  btn.disabled = true; btn.textContent = 'Building…';
+  await fetch('/api/build/{{ meta.date }}?layout=' + encodeURIComponent(layout), {method: 'POST'});
+  // Encoding takes a while; reload once the metadata lists the new video.
+  const t = setInterval(async () => {
+    const r = await fetch(location.href, {cache: 'no-store'});
+    const html = await r.text();
+    if (!html.includes(`buildLayout('${layout}'`)) { clearInterval(t); location.reload(); }
+  }, 5000);
 }
 </script>
 {% endblock %}

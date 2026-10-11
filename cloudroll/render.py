@@ -217,3 +217,118 @@ def thermal_with_scale(matrix, scale):
     _color_bar(ImageDraw.Draw(img), 8 + 640 + 14, 8, 480, scale, matrix["ambient"],
                palette(scale))
     return img
+
+
+# ---------------------------------------------------------------------------
+# Multi-source layouts (1920×1080): one source large, the rest as thumbnails
+# ---------------------------------------------------------------------------
+
+LAYOUT_W, LAYOUT_H = 1920, 1080
+CAPTION_H = 28
+STALE = (225, 112, 85)     # #e17055
+
+
+def _caption(d, box, text, stale=False):
+    x, y = box[0] + 10, box[1] + CAPTION_H / 2 + 2
+    f = _font(13, True)
+    d.text((x, y), text.upper(), font=f, fill=LABEL, anchor="lm")
+    if stale:
+        d.text((x + d.textlength(text.upper(), font=f) + 10, y), "STALE", font=f,
+               fill=STALE, anchor="lm")
+
+
+def _fit(img, w, h):
+    s = min(w / img.width, h / img.height)
+    return img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))),
+                      Image.LANCZOS)
+
+
+def _source_card(canvas, d, box, panel, aspect):
+    """Rounded card with a caption strip; the image is letterboxed into the rest.
+    A missing image becomes a placeholder of the source's usual shape."""
+    x0, y0, x1, y1 = box
+    d.rounded_rectangle(box, 8, fill=CARD)
+    _caption(d, box, panel.label, stale=panel.status == "stale")
+    aw, ah = x1 - x0 - 16, y1 - y0 - CAPTION_H - 8
+    if panel.image is not None:
+        im = _fit(panel.image, aw, ah)
+        w, h = im.size
+    else:
+        s = min(aw / aspect, ah)
+        w, h = round(s * aspect), round(s)
+    px = x0 + (x1 - x0 - w) // 2
+    py = y0 + CAPTION_H + (ah - h) // 2
+    if panel.image is not None:
+        canvas.paste(im, (px, py))
+    else:
+        d.rectangle([px, py, px + w, py + h], fill=BG, outline=BORDER)
+        d.text((px + w / 2, py + h / 2), f"{panel.label} – no image", font=_font(18),
+               fill=MUTED, anchor="mm")
+
+
+def _thermal_card(canvas, d, box, matrix, scale, size=(480, 360)):
+    x0, y0, x1, y1 = box
+    d.rounded_rectangle(box, 8, fill=CARD)
+    _caption(d, box, "IR sky")
+    tw, th = size
+    tx = x0 + 8
+    ty = y0 + CAPTION_H + (y1 - y0 - CAPTION_H - 8 - th) // 2
+    canvas.paste(thermal_image(matrix, scale, size), (tx, ty))
+    _color_bar(d, tx + tw + 12, ty, th, scale, matrix["ambient"], palette(scale))
+
+
+def _stats_card(d, box, cols, readings):
+    x0, y0, x1, y1 = box
+    d.rounded_rectangle(box, 8, fill=CARD)
+    items = stat_items(readings)
+    rows = (len(items) + cols - 1) // cols
+    gap, ip = 10, 10
+    bw = (x1 - x0 - 2 * ip - (cols - 1) * gap) / cols
+    bh = (y1 - y0 - 2 * ip - (rows - 1) * gap) / rows
+    f_lbl, f_val = _font(14), _font(min(30, int(bw / 6.5)), True)
+    for i, (label, value, col) in enumerate(items):
+        r, c = divmod(i, cols)
+        bx, by = x0 + ip + c * (bw + gap), y0 + ip + r * (bh + gap)
+        d.rounded_rectangle([bx, by, bx + bw, by + bh], 6, fill=BOX)
+        d.text((bx + bw / 2, by + bh * 0.32), label.upper(), font=f_lbl, fill=LABEL, anchor="mm")
+        d.text((bx + bw / 2, by + bh * 0.66), value, font=f_val, fill=col, anchor="mm")
+
+
+def _stack(box, n, gap=12):
+    """Split box vertically into n equal boxes."""
+    x0, y0, x1, y1 = box
+    h = (y1 - y0 - (n - 1) * gap) / n
+    return [(x0, round(y0 + i * (h + gap)), x1, round(y0 + i * (h + gap) + h)) for i in range(n)]
+
+
+def compose_layout(primary, panels, aspects, matrix, readings, scale, when, location_name,
+                   title="CloudRoll"):
+    """Build a 1920×1080 frame with source `primary` large.
+
+    panels  – fetched sources in config order (name, label, image, status)
+    aspects – width/height per source name, used for the geometry and for
+              placeholders, so a missing image doesn't change the layout
+    A squarish primary (allsky) fills the left side; a wide one (a 16:9 camera)
+    sits top-left with the conditions grid underneath."""
+    W, H = LAYOUT_W, LAYOUT_H
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+    d.text((16, 24), title, font=_font(24, True), fill=HEADING, anchor="lm")
+    d.text((W - 16, 24), f"{location_name}  ·  {when.strftime('%Y-%m-%d %H:%M %Z')}",
+           font=_font(17), fill=TEXT, anchor="rm")
+
+    main = next(p for p in panels if p.name == primary)
+    others = [p for p in panels if p.name != primary]
+    if aspects.get(primary, 16 / 9) < 1.3:
+        _source_card(img, d, (8, 48, 1036, H - 8), main, aspects.get(primary, 1.0))
+        for p, box in zip(others, _stack((1048, 48, W - 8, 572), len(others)) if others else []):
+            _source_card(img, d, box, p, aspects.get(p.name, 16 / 9))
+        _thermal_card(img, d, (1048, 584, 1636, H - 8), matrix, scale)
+        _stats_card(d, (1648, 584, W - 8, H - 8), 2, readings)
+    else:
+        _source_card(img, d, (8, 48, 1304, 812), main, aspects.get(primary, 16 / 9))
+        _stats_card(d, (8, 824, 1304, H - 8), 4, readings)
+        _thermal_card(img, d, (1316, 48, W - 8, 452), matrix, scale)
+        for p, box in zip(others, _stack((1316, 464, W - 8, H - 8), len(others)) if others else []):
+            _source_card(img, d, box, p, aspects.get(p.name, 1.0))
+    return img

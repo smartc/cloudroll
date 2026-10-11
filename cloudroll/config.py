@@ -8,6 +8,7 @@ explicit latitude/longitude pair, which takes precedence when both are set.
 import copy
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -44,6 +45,14 @@ DEFAULTS = {
     "retention": {"frames_days": 7, "readings_days": 0, "timelapses_days": 0},
     "web": {"host": "0.0.0.0", "port": 8090, "title": "CloudRoll"},
     "data_dir": "data",
+    # Optional extra images (allsky, observatory cams, …) composited into each frame.
+    # With none configured, frames are the classic thermal + conditions layout.
+    "homeassistant": {"url": "", "token": "", "token_file": "", "verify_ssl": True},
+    "sources": [],
+    # Source names that get a layout with themselves as the large image; every
+    # capture renders all of them.  Defaults to every source, in config order.
+    "layouts": None,
+    "source_timeout_sec": 15,
 }
 
 
@@ -77,7 +86,26 @@ def load_config(path=CONFIG_PATH):
         data_dir = PROJECT_ROOT / data_dir
     cfg["data_dir"] = data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
+    _check_sources(cfg)
     return cfg
+
+
+def _check_sources(cfg):
+    names = [s.get("name") for s in cfg["sources"]]
+    for s in cfg["sources"]:
+        if not s.get("name") or not re.fullmatch(r"[a-z0-9_-]+", s["name"]):
+            raise SystemExit(f"config.json: source name {s.get('name')!r} must be "
+                             "lowercase letters, digits, '-' or '_'")
+        if s.get("type") not in ("homeassistant", "url", "rtsp"):
+            raise SystemExit(f"config.json: source {s['name']!r} has unknown type "
+                             f"{s.get('type')!r} (homeassistant, url or rtsp)")
+    if len(set(names)) != len(names):
+        raise SystemExit("config.json: source names must be unique")
+    if cfg["layouts"] is None:
+        cfg["layouts"] = list(names)
+    unknown = [n for n in cfg["layouts"] if n not in names]
+    if unknown:
+        raise SystemExit(f"config.json: layouts {unknown} don't match any source name")
 
 
 def resolve_location(cfg):

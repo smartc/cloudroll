@@ -2,12 +2,22 @@
 
 data/
   latest.jpg / latest.json              most recent capture
-  frames/<window-date>/<UTC stamp>.jpg  composite frames (deleted once the day's timelapse is built)
+  latest-<layout>.jpg                   most recent capture in each layout (image sources only)
+  frames/<window-date>/<UTC stamp>.jpg  composite frames, classic layout (no image sources)
+  frames/<window-date>/<layout>/<UTC stamp>.jpg
+                                        composite frames, one folder per layout
+  sources/<window-date>/<source>/<UTC stamp>.<ext>
+                                        each source's original image as fetched
   readings/<window-date>.jsonl          one JSON record per capture: readings + raw 32×24 matrix
   readings/<window-date>.jsonl.gz       same, gzipped once the window has closed
   timelapses/<window-date>.mp4          finished day timelapse
   timelapses/<window-date>.jpg          poster (middle frame)
+  timelapses/<window-date>.<layout>.mp4/.jpg
+                                        further layouts of the same day
   timelapses/<window-date>.json         metadata
+
+Frames and sources are kept for retention.frames_days, independent of the
+timelapse build, so a day can be browsed or re-encoded in another layout.
 """
 
 import gzip
@@ -28,40 +38,98 @@ class Store:
         self.frames = self.root / "frames"
         self.readings = self.root / "readings"
         self.timelapses = self.root / "timelapses"
-        for d in (self.frames, self.readings, self.timelapses):
+        self.sources = self.root / "sources"
+        for d in (self.frames, self.readings, self.timelapses, self.sources):
             d.mkdir(parents=True, exist_ok=True)
         self._lines_cache = {}          # day -> (stat key, [raw JSON lines])
         self._summary_cache = {}        # day -> (stat key, summary)
         self._cache_lock = threading.Lock()
 
     # -- frames -------------------------------------------------------------
-    def save_frame(self, window_date, when, img, quality):
+    def save_frame(self, window_date, when, images, quality, latest=None):
+        """Save one capture's composites.  images maps layout -> PIL image, with
+        layout None for the classic single-layout frame.  latest.jpg gets the
+        `latest` layout (or the only one)."""
         day_dir = self.frames / window_date.isoformat()
-        day_dir.mkdir(exist_ok=True)
         stamp = when.astimezone(timezone.utc).strftime(STAMP_FMT)
-        jpg = day_dir / f"{stamp}.jpg"
-        tmp = jpg.with_suffix(".tmp")
-        img.save(tmp, "JPEG", quality=quality)
-        tmp.replace(jpg)
-        latest_tmp = self.root / "latest.tmp"
-        shutil.copyfile(jpg, latest_tmp)
-        latest_tmp.replace(self.root / "latest.jpg")
-        return jpg
+        paths = {}
+        for layout, img in images.items():
+            d = day_dir / layout if layout else day_dir
+            d.mkdir(parents=True, exist_ok=True)
+            jpg = d / f"{stamp}.jpg"
+            tmp = jpg.with_suffix(".tmp")
+            img.save(tmp, "JPEG", quality=quality)
+            tmp.replace(jpg)
+            paths[layout] = jpg
+            if layout:
+                self._copy_atomic(jpg, self.root / f"latest-{layout}.jpg")
+        main = latest if latest in paths else next(iter(paths))
+        self._copy_atomic(paths[main], self.root / "latest.jpg")
+        return paths
+
+    def _copy_atomic(self, src, dst):
+        tmp = dst.with_suffix(".tmp")
+        shutil.copyfile(src, tmp)
+        tmp.replace(dst)
+
+    def save_source(self, window_date, when, name, data, ext="jpg"):
+        d = self.sources / window_date.isoformat() / name
+        d.mkdir(parents=True, exist_ok=True)
+        stamp = when.astimezone(timezone.utc).strftime(STAMP_FMT)
+        path = d / f"{stamp}.{ext}"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+        return path
+
+    def latest_source(self, name):
+        """Path of the newest stored image for a source, or None."""
+        for day in sorted((p.name for p in self.sources.iterdir() if p.is_dir()), reverse=True):
+            files = sorted((self.sources / day / name).glob("*.*"))
+            if files:
+                return files[-1]
+        return None
 
     def frame_days(self):
         return sorted((p.name for p in self.frames.iterdir() if p.is_dir()), reverse=True)
 
-    def frames_for(self, day):
+    def frame_layouts(self, day):
         d = self.frames / day
-        return sorted(p.name for p in d.glob("*.jpg")) if d.is_dir() else []
+        return sorted(p.name for p in d.iterdir() if p.is_dir()) if d.is_dir() else []
+
+    def frames_for(self, day, layout=None):
+        """Frame names (UTC stamps) for a day in a layout.  Classic frames saved
+        before image sources were configured count for every layout, so the
+        switch-over day stays complete.  layout None = every frame of the day."""
+        d = self.frames / day
+        if not d.is_dir():
+            return []
+        names = {p.name for p in d.glob("*.jpg")}
+        for sub in ([layout] if layout else self.frame_layouts(day)):
+            names |= {p.name for p in (d / sub).glob("*.jpg")}
+        return sorted(names)
+
+    def frame_path(self, day, name, layout=None):
+        """Where frame `name` lives: the layout's folder, else the classic file,
+        else any layout that has it (None if nowhere)."""
+        d = self.frames / day
+        for sub in ([layout] if layout else []) + [""] + self.frame_layouts(day):
+            p = d / sub / name if sub else d / name
+            if p.is_file():
+                return p
+        return None
+
+    def has_frames(self, day):
+        return bool(self.frames_for(day))
 
     def delete_frames(self, day):
         shutil.rmtree(self.frames / day, ignore_errors=True)
+        shutil.rmtree(self.sources / day, ignore_errors=True)
 
-    def recent_frames(self, n):
+    def recent_frames(self, n, layout=None):
         out = []
         for day in self.frame_days():
-            for name in reversed(self.frames_for(day)):
+            for name in reversed(self.frames_for(day, layout)):
                 out.append((day, name))
                 if len(out) >= n:
                     return out
@@ -194,8 +262,13 @@ class Store:
         src.unlink()
 
     # -- timelapses ---------------------------------------------------------
-    def timelapse_path(self, day):
-        return self.timelapses / f"{day}.mp4"
+    def timelapse_path(self, day, layout=None):
+        """The day's main video, or the file for one layout (None if not built)."""
+        if layout is None:
+            return self.timelapses / f"{day}.mp4"
+        meta = self.timelapse_meta(day) or {}
+        video = (meta.get("videos") or {}).get(layout)
+        return self.timelapses / video["mp4"] if video else None
 
     def timelapse_list(self):
         out = []
@@ -220,9 +293,11 @@ class Store:
         removed = []
         frames_days = retention.get("frames_days", 0)
         if frames_days > 0:
-            # Safety net for days whose timelapse never got built.
+            # Frames and source images are kept this long whether or not the
+            # day's timelapse has been built.
             cutoff = today - timedelta(days=frames_days)
-            for day in self.frame_days():
+            days = set(self.frame_days()) | {p.name for p in self.sources.iterdir() if p.is_dir()}
+            for day in sorted(days):
                 if date.fromisoformat(day) < cutoff:
                     self.delete_frames(day)
                     removed.append(f"frames/{day}")
@@ -238,8 +313,8 @@ class Store:
             cutoff = today - timedelta(days=tl_days)
             for meta in self.timelapse_list():
                 if date.fromisoformat(meta["date"]) < cutoff:
-                    for ext in (".mp4", ".jpg", ".json"):
-                        (self.timelapses / f"{meta['date']}{ext}").unlink(missing_ok=True)
+                    for p in self.timelapses.glob(f"{meta['date']}.*"):
+                        p.unlink(missing_ok=True)
                     removed.append(f"timelapses/{meta['date']}")
         return removed
 

@@ -39,5 +39,46 @@
     "port": 8090,
     "title": "CloudRoll"
   },
-  "data_dir": "data"
+  "data_dir": "data",
+  "homeassistant": {
+    "url": "",
+    "token_file": "~/.config/cloudroll/ha_token",
+    "verify_ssl": true
+  },
+  "sources": [],
+  "_sources_example": [
+    {
+      "name": "allsky",
+      "label": "Allsky",
+      "type": "homeassistant",
+      "entity": "image.allsky_camera",
+      "max_age_sec": 300,
+      "link": "https://allsky.example.com/indi-allsky/"
+    },
+    {
+      "name": "observatory",
+      "label": "Observatory",
+      "type": "homeassistant",
+      "entity": "camera.observatory"
+    },
+    {
+      "name": "gate",
+      "label": "Gate",
+      "type": "url",
+      "url": "https://allsky.example.com/indi-allsky/images/latest.jpg",
+      "crop": [
+        0.05,
+        0.05,
+        0.95,
+        0.95
+      ]
+    },
+    {
+      "name": "dome",
+      "label": "Dome",
+      "type": "rtsp",
+      "url": "rtsp://user:pass@camera.example.com:554/h264Preview_01_main"
+    }
+  ],
+  "layouts": null
 }

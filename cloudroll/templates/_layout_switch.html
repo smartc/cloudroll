@@ -1,0 +1,6 @@
+{% if layouts|length > 1 %}
+<div class="layout-switch" role="group" aria-label="Large image">
+  <span class="muted">Large image:</span>
+  {% for l in layouts %}<button type="button" class="tbtn" data-layout="{{ l.name }}">{{ l.label }}</button>{% endfor %}
+</div>
+{% endif %}

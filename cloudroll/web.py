@@ -6,9 +6,11 @@ import json
 import re
 import threading
 from datetime import datetime
+from pathlib import Path
 
 from flask import (Flask, Response, abort, jsonify, render_template, request,
                    send_from_directory, url_for)
+from PIL import Image
 
 from . import __version__
 from .render import thermal_with_scale
@@ -18,7 +20,9 @@ from .sun import window_bounds, window_date_for
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 FRAME_RE = re.compile(r"^\d{8}T\d{6}Z\.jpg$")
-TL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.(mp4|jpg)$")
+SOURCE_RE = re.compile(r"^\d{8}T\d{6}Z\.(jpg|png|webp)$")
+SOURCE_WIDTHS = (320, 480, 640, 800, 960, 1280)
+TL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(\.[a-z0-9_-]+)?\.(mp4|jpg)$")
 GRID_ROWS, GRID_COLS = 24, 32
 READINGS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl(\.gz)?$")
 
@@ -42,9 +46,23 @@ def month_nav(dates, requested):
     return {"month": month, "months": months, "counts": counts, "newer": newer, "older": older}
 
 
-def create_app(cfg, loc, store, worker, sensor):
+def create_app(cfg, loc, store, worker, sensor, settings):
     app = Flask(__name__)
     offset = cfg["timelapse"]["offset_after_sunrise_min"]
+    labels = {s["name"]: s.get("label") or s["name"].title() for s in cfg["sources"]}
+    layouts = [{"name": n, "label": labels[n]} for n in cfg["layouts"]]
+
+    def req_layout():
+        """?layout= if it names a configured layout, else None."""
+        lay = request.args.get("layout")
+        return lay if lay in cfg["layouts"] else None
+
+    def videos(meta):
+        """{layout key: video info} for a day; older metadata has only the main video."""
+        if meta.get("videos"):
+            return meta["videos"]
+        return {"classic": {"mp4": f"{meta['date']}.mp4", "jpg": f"{meta['date']}.jpg",
+                            "size_bytes": meta.get("size_bytes")}}
 
     def check_day(day):
         if not DAY_RE.match(day):
@@ -53,10 +71,24 @@ def create_app(cfg, loc, store, worker, sensor):
     def local_time(name):
         return stamp_to_datetime(name).astimezone(loc.tz)
 
+    def static_url(filename):
+        """Static file URL with its modification time, so browsers never run
+        a stale script or stylesheet after an update."""
+        try:
+            v = int((Path(app.static_folder) / filename).stat().st_mtime)
+        except OSError:
+            v = __version__
+        return url_for("static", filename=filename, v=v)
+
     @app.context_processor
     def globals_():
         return {"title": cfg["web"]["title"], "location": loc, "version": __version__,
-                "sensor_url": sensor.web_url()}
+                "static_url": static_url,
+                "sensor_url": sensor.web_url(), "layouts": layouts,
+                "source_links": [{"label": s.get("label") or s["name"].title(), "url": s["link"]}
+                                 for s in cfg["sources"] if s.get("link")],
+                "layout_cfg": {"layouts": cfg["layouts"],
+                               "default": settings.dashboard_default}}
 
     @app.template_filter("hm")
     def hm(iso):
@@ -78,13 +110,14 @@ def create_app(cfg, loc, store, worker, sensor):
     @app.route("/live")
     def live():
         recent = [{"day": d, "name": n, "time": local_time(n).strftime("%H:%M")}
-                  for d, n in store.recent_frames(12)]
+                  for d, n in store.recent_frames(12, settings.dashboard_default)]
         current = window_date_for(loc, datetime.now(loc.tz), offset)
         start, end = window_bounds(loc, current, offset)
         return render_template("index.html", latest=store.latest_meta(), recent=recent,
                                timelapses=store.timelapse_list()[:4], worker=worker,
                                window_start=start, window_end=end, offset=offset,
-                               interval=cfg["capture"]["interval_sec"])
+                               interval=cfg["capture"]["interval_sec"],
+                               settings=settings.as_dict(), labels=labels)
 
     @app.route("/timelapses")
     def timelapses():
@@ -126,7 +159,11 @@ def create_app(cfg, loc, store, worker, sensor):
                                next_day=days[i + 1] if i < len(days) - 1 else None,
                                has_timelapse=store.timelapse_path(day).exists(),
                                readings=store.readings_file(day), follow=follow,
-                               poll_sec=min(15, cfg["capture"]["interval_sec"]))
+                               poll_sec=min(15, cfg["capture"]["interval_sec"]),
+                               cams=[{"name": n, "label": lb,
+                                      "aspect": round(worker.source_aspect(n), 4)}
+                                     for n, lb in labels.items()],
+                               frames_days=cfg["retention"]["frames_days"])
 
     @app.route("/timelapse/<day>")
     def timelapse(day):
@@ -134,14 +171,17 @@ def create_app(cfg, loc, store, worker, sensor):
         meta = store.timelapse_meta(day)
         if not meta or not store.timelapse_path(day).exists():
             abort(404)
-        return render_template("timelapse.html", meta=meta,
-                               has_frames=bool(store.frames_for(day)),
-                               readings=store.readings_file(day))
+        vids = videos(meta)
+        has_frames = store.has_frames(day)
+        missing = [lay for lay in layouts if lay["name"] not in vids] if has_frames else []
+        tabs = [{"key": k, "label": labels.get(k, "Classic"), **v} for k, v in vids.items()]
+        return render_template("timelapse.html", meta=meta, tabs=tabs, missing=missing,
+                               has_frames=has_frames, readings=store.readings_file(day))
 
     @app.route("/day/<day>")
     def day_view(day):
         check_day(day)
-        frames = store.frames_for(day)
+        frames = store.frames_for(day, settings.dashboard_default)
         if not frames:
             abort(404)
         start, end = window_bounds(loc, datetime.fromisoformat(day).date(), offset)
@@ -154,14 +194,25 @@ def create_app(cfg, loc, store, worker, sensor):
     @app.route("/api/latest")
     def api_latest():
         return jsonify({"meta": store.latest_meta(),
-                        "last_error": worker.last_error})
+                        "last_error": worker.last_error,
+                        "sources": worker.last_sources})
+
+    @app.route("/api/settings", methods=["GET", "POST"])
+    def api_settings():
+        if request.method == "GET":
+            return jsonify(settings.as_dict())
+        try:
+            return jsonify(settings.update(request.get_json(force=True) or {}))
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
 
     @app.route("/api/frames/<day>")
     def api_frames(day):
         check_day(day)
+        lay = req_layout() or settings.dashboard_default
         return jsonify([{"name": n, "time": local_time(n).strftime("%H:%M"),
-                         "url": url_for("media_frame", day=day, name=n)}
-                        for n in store.frames_for(day)])
+                         "url": url_for("media_frame", day=day, name=n, layout=lay)}
+                        for n in store.frames_for(day, lay)])
 
     @app.route("/api/readings/<day>.json")
     def api_readings_series(day):
@@ -175,11 +226,16 @@ def create_app(cfg, loc, store, worker, sensor):
         p = store.readings_file(day)
         out = {"since": since, "count": len(lines), "open": p.suffix != ".gz",
                "latest_day": store.readings_days()[0],
-               "t": [], "grid": [], **{k: [] for k in SCALAR_FIELDS}}
+               "t": [], "grid": [], "frame": [], **{k: [] for k in SCALAR_FIELDS},
+               **{f"src_{n}": [] for n in labels}}
         for line in lines[since:]:
             rec = json.loads(line)
             out["t"].append(datetime.fromisoformat(rec["time"]).timestamp() * 1000)
             out["grid"].append(rec.get("pixels") is not None)
+            out["frame"].append(rec.get("frame"))
+            src = rec.get("sources") or {}
+            for n in labels:
+                out[f"src_{n}"].append(src.get(n))
             r = rec.get("readings", {})
             for k in SCALAR_FIELDS:
                 out[k].append(r.get(k))
@@ -257,15 +313,21 @@ def create_app(cfg, loc, store, worker, sensor):
     @app.route("/api/build/<day>", methods=["POST"])
     def api_build(day):
         check_day(day)
-        if not store.frames_for(day):
+        if not store.has_frames(day):
             abort(404)
-        threading.Thread(target=worker.build, args=(day,), daemon=True).start()
-        return jsonify({"status": "started", "day": day})
+        lay = request.args.get("layout")
+        if lay and lay not in cfg["layouts"] and lay != "both":
+            abort(400)
+        threading.Thread(target=worker.build, args=(day, lay), daemon=True).start()
+        return jsonify({"status": "started", "day": day, "layout": lay})
 
     # -- media --------------------------------------------------------------
     @app.route("/media/latest.jpg")
     def media_latest():
-        resp = send_from_directory(store.root, "latest.jpg", max_age=0)
+        lay = req_layout()
+        name = f"latest-{lay}.jpg" if lay and (store.root / f"latest-{lay}.jpg").exists() \
+            else "latest.jpg"
+        resp = send_from_directory(store.root, name, max_age=0)
         resp.headers["Cache-Control"] = "no-store"
         return resp
 
@@ -274,7 +336,39 @@ def create_app(cfg, loc, store, worker, sensor):
         check_day(day)
         if not FRAME_RE.match(name):
             abort(404)
-        return send_from_directory(store.frames / day, name, max_age=86400)
+        path = store.frame_path(day, name, req_layout())
+        if path is None:
+            abort(404)
+        return send_from_directory(path.parent, name, max_age=86400)
+
+    @app.route("/media/sources/<day>/<source>/<name>")
+    def media_source(day, source, name):
+        """A source's original image as fetched (kept for retention.frames_days)."""
+        check_day(day)
+        if source not in labels or not SOURCE_RE.match(name):
+            abort(404)
+        folder = store.sources / day / source
+        path = folder / name
+        if not path.is_file():
+            # Records only know the stamp; the source may have been a PNG/WebP.
+            path = next(iter(sorted(folder.glob(Path(name).stem + ".*"))), None)
+            if path is None or not SOURCE_RE.match(path.name):
+                abort(404)
+        w = request.args.get("w", type=int)
+        if not w:
+            return send_from_directory(folder, path.name, max_age=86400)
+        # Downscaled copy for the data page: originals are up to 4K / ~600 KB.
+        w = min(SOURCE_WIDTHS, key=lambda v: abs(v - w))
+        with Image.open(path) as im:
+            im.draft("RGB", (w, w))
+            im = im.convert("RGB")
+            if im.width > w:
+                im = im.resize((w, round(im.height * w / im.width)), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=85)
+        resp = Response(buf.getvalue(), mimetype="image/jpeg")
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
     @app.route("/media/readings/<name>")
     def media_readings(name):

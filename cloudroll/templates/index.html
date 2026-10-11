@@ -2,9 +2,10 @@
 {% block content %}
 <div class="card">
   <h2>Latest Sky Image</h2>
+  {% include "_layout_switch.html" %}
   <div class="live-wrap">
     {% if latest %}
-    <img id="live-img" class="live" src="{{ url_for('media_latest') }}" alt="Latest IR sky image">
+    <img id="live-img" class="live" src="{{ url_for('media_latest', layout=settings.dashboard_default) }}" alt="Latest sky image">
     {% else %}
     <p class="muted">No captures yet – the first frame will appear within {{ interval }} s.</p>
     {% endif %}
@@ -13,6 +14,7 @@
     {% if latest %}Captured {{ latest.time|hm }}{% endif %}
     {% if worker.last_error %} · <span class="err">Last error: {{ worker.last_error }}</span>{% endif %}
   </div>
+  <div id="source-status" class="status"></div>
   <div class="status">Current timelapse window: {{ window_start.strftime('%a %H:%M') }} → {{ window_end.strftime('%a %H:%M') }} (sunrise + {{ offset }} min)</div>
 </div>
 
@@ -22,7 +24,8 @@
   <div class="thumbs">
     {% for f in recent %}
     <a href="{{ url_for('day_view', day=f.day) }}#{{ f.name }}" class="thumb">
-      <img src="{{ url_for('media_frame', day=f.day, name=f.name) }}" loading="lazy" alt="{{ f.time }}">
+      <img src="{{ url_for('media_frame', day=f.day, name=f.name, layout=settings.dashboard_default) }}"
+           data-src="{{ url_for('media_frame', day=f.day, name=f.name) }}" loading="lazy" alt="{{ f.time }}">
       <span>{{ f.time }}</span>
     </a>
     {% endfor %}
@@ -35,12 +38,63 @@
   {% include "_tl_grid.html" %}
   <p><a href="{{ url_for('timelapses') }}">All timelapses &rarr;</a></p>
 </div>
+
+{% if layouts|length > 1 %}
+<div class="card">
+  <h2>Layout Settings</h2>
+  <form id="settings-form" class="settings">
+    <fieldset>
+      <legend>Dashboard default</legend>
+      <p class="muted">Large image for browsers that haven't picked one with the buttons above.</p>
+      {% for l in layouts %}
+      <label><input type="radio" name="dashboard_default" id="dash-{{ l.name }}" value="{{ l.name }}"
+             {% if l.name == settings.dashboard_default %}checked{% endif %}> {{ l.label }}</label>
+      {% endfor %}
+    </fieldset>
+    <fieldset>
+      <legend>Timelapse videos</legend>
+      <p class="muted">Layouts encoded when a day's timelapse is built. Every capture is rendered in all layouts, so this can change at any time and applies from the next build.</p>
+      {% for l in layouts %}
+      <label><input type="checkbox" name="timelapse_layouts" id="tl-{{ l.name }}" value="{{ l.name }}"
+             {% if l.name in settings.timelapse_layouts %}checked{% endif %}> {{ l.label }} large</label>
+      {% endfor %}
+    </fieldset>
+    <button type="submit" class="tbtn">Save settings</button>
+    <span id="settings-msg" class="muted" role="status"></span>
+  </form>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
 const INTERVAL = {{ interval }} * 1000;
+const LATEST = "{{ url_for('media_latest') }}";
+const LABELS = {{ labels|tojson }};
 let lastTime = {{ (latest.time if latest else '')|tojson }};
+
+function refreshImages() {
+  const live = document.getElementById('live-img');
+  if (live) live.src = CRLayout.url(LATEST + '?t=' + Date.now());
+  document.querySelectorAll('.thumb img[data-src]').forEach(img => {
+    img.src = CRLayout.url(img.dataset.src);
+  });
+}
+CRLayout.onChange(refreshImages);
+if (CRLayout.get() !== CR_LAYOUTS.default) refreshImages();
+
+function showSources(src) {
+  const el = document.getElementById('source-status');
+  el.textContent = '';
+  Object.entries(src || {}).forEach(([name, s], k) => {
+    if (k) el.append(' · ');
+    const span = document.createElement('span');
+    span.textContent = `${LABELS[name] || name}: ${s.status.startsWith('error') ? 'failed' : s.status} (${s.seconds} s)`;
+    if (s.status !== 'ok') { span.className = 'err'; span.title = s.status; }
+    el.append(span);
+  });
+}
+
 async function poll() {
   try {
     const r = await fetch("{{ url_for('api_latest') }}", {cache: "no-store"});
@@ -49,7 +103,8 @@ async function poll() {
     if (j.meta && j.meta.time !== lastTime) {
       if (!lastTime) { location.reload(); return; }
       lastTime = j.meta.time;
-      document.getElementById('live-img').src = "{{ url_for('media_latest') }}?t=" + Date.now();
+      const live = document.getElementById('live-img');
+      live.src = CRLayout.url(LATEST + '?t=' + Date.now());
     }
     if (j.meta) {
       st.textContent = 'Captured ' + j.meta.time.substr(11, 5);
@@ -59,8 +114,29 @@ async function poll() {
         st.appendChild(e);
       }
     }
+    showSources(j.sources);
   } catch (e) { /* server restarting – try again next tick */ }
 }
 setInterval(poll, Math.min(INTERVAL, 30000));
+poll();
+
+const form = document.getElementById('settings-form');
+if (form) form.addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('settings-msg');
+  const body = {
+    dashboard_default: form.querySelector('[name=dashboard_default]:checked').value,
+    timelapse_layouts: [...form.querySelectorAll('[name=timelapse_layouts]:checked')].map(c => c.value),
+  };
+  if (!body.timelapse_layouts.length) { msg.textContent = 'Pick at least one timelapse layout.'; return; }
+  try {
+    const r = await fetch("{{ url_for('api_settings') }}", {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json();
+    msg.textContent = r.ok ? 'Saved.' : ('Not saved: ' + j.error);
+  } catch (err) {
+    msg.textContent = 'Not saved: the server did not respond.';
+  }
+});
 </script>
 {% endblock %}

@@ -5,20 +5,32 @@ Captures the IR sky image and conditions from the
 timelapse frame (thermal image + colour scale + conditions panel), builds one MP4 per
 day, and serves a gallery web page.
 
+Optionally, other cameras – an allsky camera, an observatory webcam, anything reachable
+through Home Assistant, a URL or RTSP – can be added to every frame. See
+[Image sources](#image-sources).
+
 A day's window runs from **sunrise + 1 h** to **sunrise + 1 h on the following day**,
 labelled by the date it starts on.
 
 Once a window closes (checked every 10 min), the day is finalised: its frames are encoded
-into one MP4 (~16 s of CPU on this board), its readings file is gzipped, and its frame
-JPEGs are deleted. Only the video and the numeric data are kept.
+into one MP4 (~16 s of CPU on this board for classic frames, about a minute per layout
+with image sources) and its readings file is gzipped. Frame JPEGs, and the original source
+images, are kept for `retention.frames_days` (7 by default) so recent days can be browsed
+frame by frame or re-encoded in another layout; the video and numeric data are kept
+long-term.
 
 ## Data layout
 
 ```
 data/latest.jpg, latest.json          most recent capture
-data/frames/<date>/*.jpg              current day's frames (removed once its timelapse is built)
+data/latest-<layout>.jpg              most recent capture in each layout (image sources only)
+data/frames/<date>/*.jpg              frames, classic layout (kept retention.frames_days)
+data/frames/<date>/<layout>/*.jpg     frames, one folder per layout (image sources only)
+data/sources/<date>/<source>/*.jpg    each source's original image as fetched
 data/readings/<date>.jsonl[.gz]       one record per capture: readings, colour scale, raw 32×24 °C matrix
-data/timelapses/<date>.mp4/.jpg/.json video, poster, metadata
+data/timelapses/<date>.mp4/.jpg/.json main video, poster, metadata
+data/timelapses/<date>.<layout>.mp4   further layouts of the same day, with their posters
+data/settings.json                    runtime settings changed from the web UI
 ```
 
 Each readings record looks like
@@ -39,6 +51,8 @@ colour scale that was in effect at capture.
 | `/api/readings/<date>/<n>.csv` | record *n*'s grid as a 24 × 32 CSV (°C) |
 | `/api/readings/<date>/<n>.png` | record *n*'s grid rendered with its colour bar |
 | `/media/readings/<date>.jsonl[.gz]` | the raw day file |
+| `/media/sources/<date>/<source>/<stamp>.jpg` | a source's original image (while frames are kept) |
+| `/api/settings` | GET / POST the runtime settings (see below) |
 
 ## Setup
 
@@ -50,7 +64,9 @@ cp config.example.json config.json      # then set sensor.host and location
 .venv/bin/python -m cloudroll run       # capture + web UI on port 8090
 ```
 
-Other commands: `capture` (one frame), `build [YYYY-MM-DD]` (rebuild a day's timelapse).
+Other commands: `capture` (one frame), `build [YYYY-MM-DD] [--layout NAME|both]` (rebuild a
+day's timelapse; while its frames are kept, in any layout). `info` also test-fetches each
+image source.
 
 To run at boot behind an Apache HTTPS proxy:
 
@@ -77,10 +93,55 @@ Copied from `config.example.json`; it holds your site's details and is not track
 | `color_scale.hot_marker` | Show magenta for pixels above the scale (fixed/floating modes) |
 | `timelapse.fps` / `crf` | Playback rate and x264 quality |
 | `timelapse.offset_after_sunrise_min` | Window start offset after sunrise (default 60) |
-| `retention.frames_days` | Safety net: delete frame folders older than N days even if no timelapse was built |
+| `retention.frames_days` | Keep frames and source images for N days, whether or not the timelapse was built |
 | `retention.readings_days` | Delete readings files older than N days (0 = keep forever) |
 | `retention.timelapses_days` | Delete timelapses older than N days (0 = keep forever) |
 | `web.host` / `web.port` | Listen address – `127.0.0.1:8090`, reached via the Apache proxy (`0.0.0.0` exposes it directly to the LAN) |
+| `homeassistant.url` / `token_file` / `token` | Home Assistant base URL and a long-lived access token (file preferred, e.g. `~/.config/cloudroll/ha_token`, mode 600) |
+| `sources` | Extra images for each frame – see below (empty = classic frames) |
+| `layouts` | Source names that each get a layout with themselves as the large image (default: all sources, in order) |
+| `source_timeout_sec` | Per-fetch timeout for image sources |
+
+## Image sources
+
+Each entry in `sources` adds one image to every frame:
+
+| Key | Meaning |
+|-----|---------|
+| `name` | Short id (`a-z0-9_-`), used in folder names and URLs |
+| `label` | Caption shown in the frame and the web UI |
+| `type` | `homeassistant` (`entity`: `image.*` via `/api/image_proxy`, `camera.*` via `/api/camera_proxy`), `url` (`url`: any JPEG/PNG), or `rtsp` (`url`: one frame grabbed with ffmpeg) |
+| `max_age_sec` | Optional: tag the image STALE when it is older than this (HA `image.*` entity time or the URL's `Last-Modified`) |
+| `crop` | Optional `[left, top, right, bottom]` as fractions, e.g. to trim an allsky's corners |
+| `aspect` | Optional width/height used for the placeholder until the first image arrives |
+| `link` | Optional URL for a "Label ↗" button in the page header, e.g. the camera's own web UI or its Home Assistant view |
+
+Sources are fetched in parallel with the sensor reads. A failed fetch draws a
+"no image" placeholder; the capture still happens and the record's `sources` field
+says what went wrong. Thermal sensor failures still skip the capture, as before.
+
+### Layouts
+
+With sources configured, frames are 1920×1080 and every capture is rendered once per
+layout – one per source named in `layouts`, with that source large:
+
+* a squarish source (an allsky) fills the left side, with the others, the IR sky image
+  and the conditions to its right;
+* a wide source (a 16:9 camera) sits top-left above the conditions grid, with the IR
+  sky image and the others in a column on the right.
+
+### Runtime settings
+
+The Live page has a layout switch (remembered per browser) and a **Layout Settings**
+card, saved to `data/settings.json`:
+
+| Setting | Meaning |
+|---------|---------|
+| Dashboard default | Large image for browsers that haven't picked one |
+| Timelapse videos | Layouts encoded when a day is built; ticking several builds one MP4 each, switchable on the timelapse page |
+
+Like **Build now**, these controls have no login; if the site is reachable from outside
+your network, restrict `/api/` in the Apache vhost.
 
 ## Data sources
 
@@ -92,6 +153,12 @@ Copied from `config.example.json`; it holds your site's details and is not track
 | Pressure | Sensor WebSocket state message (not exposed via Alpaca) |
 
 `SkyConditions_90640/` is a read-only reference clone of the sensor repo and is not part of this project.
+
+## Roadmap
+
+* **Scope markers on the allsky image** – for each frame, mark where each telescope is
+  pointing. Needs the mount's RA/Dec (or alt/az) captured with each frame from ASCOM
+  Alpaca or INDI, projected through the allsky lens calibration.
 
 ## License
 

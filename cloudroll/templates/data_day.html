@@ -45,9 +45,25 @@
       <a class="tbtn" id="rec-json" href="#" download>Record JSON</a>
       <a class="tbtn" id="rec-csv" href="#" download title="This record's temperatures as a 24 × 32 grid (°C)">Grid CSV</a>
     </div>
-    <div class="rec-img"><img id="rec-img" alt="Stored temperature grid"><p id="rec-noimg" class="muted" hidden>No temperature grid stored for this record (captured before raw grids were recorded).</p></div>
+    {% if cams %}
+    <div class="rec-cams">
+      {% for c in cams %}
+      <figure class="cam" id="cam-{{ c.name }}" style="--ar: {{ c.aspect }}">
+        <figcaption>{{ c.label }} <span class="cam-stale" hidden>stale</span></figcaption>
+        <button type="button" class="cam-frame zoomable" data-zoom="{{ c.name }}" aria-label="Enlarge {{ c.label }}">
+          <img alt="{{ c.label }} at the selected record" hidden>
+          <span class="cam-msg">Loading…</span>
+        </button>
+      </figure>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <figure class="cam thermal">
+      {% if cams %}<figcaption>IR sky</figcaption>{% endif %}
+      <div class="rec-img"><img id="rec-img" class="zoomable" data-zoom="thermal" alt="Stored temperature grid" tabindex="0" role="button" aria-label="Enlarge IR sky image"><p id="rec-noimg" class="cam-empty-msg" hidden>No temperature grid stored for this record (captured before raw grids were recorded).</p></div>
+    </figure>
     <table id="rec-table"></table>
-    <p class="muted">Click any chart to pick a record; ← / → step through them. The image is re-rendered from the stored 32×24 grid using the colour scale in effect at capture.</p>
+    <p class="muted">Click any chart to pick a record; ← / → step through them. Click an image to enlarge it. The IR image is re-rendered from the stored 32×24 grid using the colour scale in effect at capture.{% if cams %} Camera images are kept {{ frames_days }} days.{% endif %}</p>
   </div>
 </div>
 
@@ -57,10 +73,111 @@
     <div class="table-wrap"><table class="data-table" id="all-table"></table></div>
   </details>
 </div>
+
+<dialog id="zoom" class="zoom" aria-labelledby="zoom-title">
+  <div class="zoom-head">
+    <h2 id="zoom-title"></h2>
+    <span class="muted">← / → step records · Esc closes</span>
+    <a id="zoom-full" class="tbtn" target="_blank" rel="noopener">Open original &#8599;</a>
+    <button type="button" class="tbtn" id="zoom-close">Close</button>
+  </div>
+  <div class="zoom-body">
+    <img id="zoom-img" alt="">
+    <p id="zoom-msg" class="cam-empty-msg" hidden></p>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='charts.js') }}"></script>
+<script src="{{ static_url('charts.js') }}"></script>
+<script>
+const CAMS = {{ cams|tojson }};
+const SRC_BASE = {{ url_for('media_source', day=day, source='_', name='x.jpg')[:-7]|tojson }};
+const KEEP_DAYS = {{ frames_days|tojson }};
+const recTime = new Intl.DateTimeFormat(undefined, {hour: '2-digit', minute: '2-digit', hour12: false,
+                                                     timeZone: {{ location.tz.key|tojson }}});
+let current = {};   // what the selected record has, per image: {url, msg}
+let zoomed = null;  // 'thermal' or a camera name while the overlay is open
+let recLabel = '';
+
+// One camera thumbnail.  Each request gets a sequence number so an image that
+// finishes loading after the selection has moved on is ignored.
+function showCam(c, stamp, status) {
+  const fig = document.getElementById('cam-' + c.name);
+  const frame = fig.querySelector('.cam-frame'), img = fig.querySelector('img');
+  const msg = fig.querySelector('.cam-msg');
+  const seq = (+frame.dataset.seq || 0) + 1;
+  frame.dataset.seq = seq;
+  fig.querySelector('.cam-stale').hidden = status !== 'stale';
+  const fail = text => {
+    img.hidden = true; img.removeAttribute('src');
+    frame.classList.add('empty'); msg.hidden = false; msg.textContent = text;
+    current[c.name] = {msg: text};
+  };
+  if (!stamp || !status) return fail('No image for this record');
+  if (status.startsWith('error')) return fail('Not captured');
+  const url = SRC_BASE + c.name + '/' + stamp;
+  current[c.name] = {url};
+  const next = new Image();
+  next.onload = () => {
+    if (frame.dataset.seq != seq) return;
+    img.src = next.src; img.hidden = false;
+    frame.classList.remove('empty'); msg.hidden = true;
+    fig.style.setProperty('--ar', (next.naturalWidth / next.naturalHeight).toFixed(4));
+  };
+  next.onerror = () => {
+    if (frame.dataset.seq != seq) return;
+    fail(`No longer kept (${KEEP_DAYS} days)`);
+    current[c.name] = {msg: `This image is no longer kept (camera images are kept ${KEEP_DAYS} days).`};
+  };
+  next.src = url + '?w=640';
+}
+
+function showCams(i, D) {
+  recLabel = recTime.format(D.t[i]);
+  CAMS.forEach(c => showCam(c, D.frame[i], (D['src_' + c.name] || [])[i]));
+  const rec = document.getElementById('rec-img');
+  current.thermal = D.grid[i] ? {url: rec.src}
+                              : {msg: 'No temperature grid stored for this record.'};
+  if (zoomed) zoomShow(zoomed);
+}
+
+// ── full-size overlay ────────────────────────────────────────────────────
+const zoom = document.getElementById('zoom');
+const LABELS = Object.fromEntries([['thermal', 'IR sky'], ...CAMS.map(c => [c.name, c.label])]);
+
+function zoomShow(name) {
+  const cur = current[name] || {msg: 'No image for this record.'};
+  const img = document.getElementById('zoom-img'), msg = document.getElementById('zoom-msg');
+  const full = document.getElementById('zoom-full');
+  document.getElementById('zoom-title').textContent = `${LABELS[name]} · ${recLabel}`;
+  img.alt = `${LABELS[name]} at ${recLabel}`;
+  if (cur.url) {
+    // Cameras: the original image; IR sky: the re-rendered grid.
+    img.src = cur.url; img.hidden = false; msg.hidden = true;
+    full.href = cur.url; full.hidden = false;
+  } else {
+    img.hidden = true; img.removeAttribute('src');
+    msg.textContent = cur.msg; msg.hidden = false; full.hidden = true;
+  }
+}
+
+function zoomOpen(name) {
+  zoomed = name;
+  zoomShow(name);
+  if (!zoom.open) zoom.showModal();
+}
+
+document.querySelectorAll('.zoomable').forEach(el => {
+  el.addEventListener('click', () => zoomOpen(el.dataset.zoom));
+  el.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && el.tagName !== 'BUTTON') { e.preventDefault(); zoomOpen(el.dataset.zoom); }
+  });
+});
+document.getElementById('zoom-close').addEventListener('click', () => zoom.close());
+zoom.addEventListener('click', e => { if (e.target === zoom) zoom.close(); });  // backdrop
+zoom.addEventListener('close', () => { zoomed = null; });
+</script>
 <script>
 DataView.init({
   day: {{ day|tojson }},
@@ -70,6 +187,7 @@ DataView.init({
   live: {{ (not s.compressed)|tojson }},
   follow: {{ follow|tojson }},
   pollSec: {{ poll_sec|tojson }},
+  onSelect: showCams,
 });
 </script>
 {% endblock %}
