@@ -37,7 +37,8 @@
   "web": {
     "host": "127.0.0.1",
     "port": 8090,
-    "title": "CloudRoll"
+    "title": "CloudRoll",
+    "cors_origins": []
   },
   "data_dir": "data",
   "homeassistant": {

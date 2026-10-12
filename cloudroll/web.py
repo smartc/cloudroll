@@ -80,6 +80,19 @@ def create_app(cfg, loc, store, worker, sensor, settings):
             v = __version__
         return url_for("static", filename=filename, v=v)
 
+    cors_origins = set(cfg["web"].get("cors_origins") or [])
+
+    @app.after_request
+    def cors(resp):
+        """Let configured origins read the JSON API and load static/ha/cloudroll-card.js
+        (module scripts need CORS) from their own pages."""
+        origin = request.headers.get("Origin")
+        if origin in cors_origins and request.path.startswith(("/api/", "/static/")) \
+                and request.method in ("GET", "HEAD", "OPTIONS"):
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers.add("Vary", "Origin")
+        return resp
+
     @app.context_processor
     def globals_():
         return {"title": cfg["web"]["title"], "location": loc, "version": __version__,
@@ -196,6 +209,20 @@ def create_app(cfg, loc, store, worker, sensor, settings):
         return jsonify({"meta": store.latest_meta(),
                         "last_error": worker.last_error,
                         "sources": worker.last_sources})
+
+    @app.route("/api/info")
+    def api_info():
+        """What a remote viewer (the Home Assistant card) needs to browse the data."""
+        return jsonify({"title": cfg["web"]["title"], "version": __version__,
+                        "location": {"name": loc.name, "latitude": loc.latitude,
+                                     "longitude": loc.longitude},
+                        "tz": loc.tz.key, "days": store.readings_days(),
+                        "cams": [{"name": n, "label": lb,
+                                  "aspect": round(worker.source_aspect(n), 4)}
+                                 for n, lb in labels.items()],
+                        "frames_days": cfg["retention"]["frames_days"],
+                        "sensor_url": sensor.web_url(),
+                        "poll_sec": min(15, cfg["capture"]["interval_sec"])})
 
     @app.route("/api/settings", methods=["GET", "POST"])
     def api_settings():

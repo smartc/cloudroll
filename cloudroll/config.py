@@ -43,7 +43,9 @@ DEFAULTS = {
     },
     "timelapse": {"fps": 24, "crf": 23, "offset_after_sunrise_min": 60},
     "retention": {"frames_days": 7, "readings_days": 0, "timelapses_days": 0},
-    "web": {"host": "0.0.0.0", "port": 8090, "title": "CloudRoll"},
+    # cors_origins: other sites (e.g. a Home Assistant dashboard card) allowed to
+    # read the /api/ JSON from a browser.
+    "web": {"host": "0.0.0.0", "port": 8090, "title": "CloudRoll", "cors_origins": []},
     "data_dir": "data",
     # Optional extra images (allsky, observatory cams, …) composited into each frame.
     # With none configured, frames are the classic thermal + conditions layout.

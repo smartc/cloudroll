@@ -96,6 +96,7 @@ Copied from `config.example.json`; it holds your site's details and is not track
 | `retention.frames_days` | Keep frames and source images for N days, whether or not the timelapse was built |
 | `retention.readings_days` | Delete readings files older than N days (0 = keep forever) |
 | `retention.timelapses_days` | Delete timelapses older than N days (0 = keep forever) |
+| `web.cors_origins` | Other sites allowed to read `/api/` from a browser, e.g. `["https://home-assist.example"]` for the Home Assistant card |
 | `web.host` / `web.port` | Listen address – `127.0.0.1:8090`, reached via the Apache proxy (`0.0.0.0` exposes it directly to the LAN) |
 | `homeassistant.url` / `token_file` / `token` | Home Assistant base URL and a long-lived access token (file preferred, e.g. `~/.config/cloudroll/ha_token`, mode 600) |
 | `sources` | Extra images for each frame – see below (empty = classic frames) |
@@ -142,6 +143,33 @@ card, saved to `data/settings.json`:
 
 Like **Build now**, these controls have no login; if the site is reachable from outside
 your network, restrict `/api/` in the Apache vhost.
+
+## Home Assistant card
+
+`cloudroll/static/ha/cloudroll-card.js` puts the Data page (day charts, record
+inspector with the matching camera and IR images, table view) into a Lovelace
+dashboard, with a "Now" row of live readings from Home Assistant entities.
+
+1. Add the Home Assistant origin to `web.cors_origins` in config.json and restart.
+2. Settings → Dashboards → ⋮ → Resources: add
+   `https://<cloudroll host>/static/ha/cloudroll-card.js?v=<n>` as a JavaScript module
+   (bump `v` after updating the card).
+3. Add the card, ideally in a panel view:
+
+```yaml
+type: custom:cloudroll-card
+url: https://<cloudroll host>
+entities:                 # optional; readings without one use CloudRoll's latest record
+  cloud_cover: sensor.observatory_sky_conditions_cloud_cover
+  ambient_temp: sensor.observatory_sky_conditions_ambient_temperature
+  sky_temp: sensor.observatory_sky_conditions_sky_temperature
+  brightness: sensor.observatory_sky_conditions_sky_brightness
+  sqm: sensor.observatory_sky_conditions_sky_quality_sqm
+  raining: binary_sensor.observatory_sky_conditions_rain_snow
+```
+
+The card reads `/api/info` (days, cameras, time zone) and the same
+`/api/readings/...` endpoints as the Data page.
 
 ## Data sources
 
