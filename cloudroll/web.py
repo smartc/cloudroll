@@ -51,6 +51,27 @@ def create_app(cfg, loc, store, worker, sensor, settings):
     offset = cfg["timelapse"]["offset_after_sunrise_min"]
     labels = {s["name"]: s.get("label") or s["name"].title() for s in cfg["sources"]}
     layouts = [{"name": n, "label": labels[n]} for n in cfg["layouts"]]
+    rigs = cfg["observatory"]["rigs"]
+    rig_labels = {r["name"]: r.get("label") or r["name"].title() for r in rigs}
+    pier_labels = {r["name"]: (r["park_sensor"].get("label") or "Pier")
+                   for r in rigs if r.get("park_sensor")}
+    # Observatory lanes for the Data page: roof, then each rig's pier and NINA state.
+    obs_rows = ([{"key": "roof", "label": "Roof", "kind": "roof"}] if rigs or
+                cfg["observatory"].get("roof") else [])
+    for r in rigs:
+        n = r["name"]
+        if n in pier_labels:
+            obs_rows.append({"key": f"pier_{n}", "label": pier_labels[n], "kind": "pier"})
+        obs_rows.append({"key": f"rig_{n}", "label": rig_labels[n], "kind": "rig",
+                         "detail": f"rigd_{n}"})
+    # Per-rig CSV columns: name suffix -> how to read it from the record's rig entry.
+    RIG_CSV = [("pier", lambda e: (e.get("pier") or {}).get("status")),
+               ("status", lambda e: e.get("status")),
+               ("detail", lambda e: e.get("detail")),
+               ("ra_h", lambda e: e.get("ra")), ("dec_deg", lambda e: e.get("dec")),
+               ("alt_deg", lambda e: e.get("alt")), ("az_deg", lambda e: e.get("az")),
+               ("pa_deg", lambda e: e.get("pa")),
+               ("marker", lambda e: None if "marker" not in e else int(bool(e["marker"])))]
 
     def req_layout():
         """?layout= if it names a configured layout, else None."""
@@ -131,8 +152,7 @@ def create_app(cfg, loc, store, worker, sensor, settings):
                                window_start=start, window_end=end, offset=offset,
                                interval=cfg["capture"]["interval_sec"],
                                settings=settings.as_dict(), labels=labels,
-                               rig_labels={r["name"]: r.get("label") or r["name"].title()
-                                           for r in cfg["observatory"]["rigs"]},
+                               rig_labels=rig_labels,
                                has_markers=bool(worker.observatory and worker.observatory.rigs))
 
     @app.route("/timelapses")
@@ -179,7 +199,8 @@ def create_app(cfg, loc, store, worker, sensor, settings):
                                cams=[{"name": n, "label": lb,
                                       "aspect": round(worker.source_aspect(n), 4)}
                                      for n, lb in labels.items()],
-                               frames_days=cfg["retention"]["frames_days"])
+                               frames_days=cfg["retention"]["frames_days"],
+                               obs_rows=obs_rows)
 
     @app.route("/timelapse/<day>")
     def timelapse(day):
@@ -258,7 +279,9 @@ def create_app(cfg, loc, store, worker, sensor, settings):
         out = {"since": since, "count": len(lines), "open": p.suffix != ".gz",
                "latest_day": store.readings_days()[0],
                "t": [], "grid": [], "frame": [], **{k: [] for k in SCALAR_FIELDS},
-               **{f"src_{n}": [] for n in labels}}
+               **{f"src_{n}": [] for n in labels},
+               **{row["key"]: [] for row in obs_rows},
+               **{row["detail"]: [] for row in obs_rows if row.get("detail")}}
         for line in lines[since:]:
             rec = json.loads(line)
             out["t"].append(datetime.fromisoformat(rec["time"]).timestamp() * 1000)
@@ -270,6 +293,15 @@ def create_app(cfg, loc, store, worker, sensor, settings):
             r = rec.get("readings", {})
             for k in SCALAR_FIELDS:
                 out[k].append(r.get(k))
+            if obs_rows:
+                obs = rec.get("observatory") or {}
+                out["roof"].append(obs.get("roof"))
+                for n in rig_labels:
+                    e = (obs.get("rigs") or {}).get(n) or {}
+                    if n in pier_labels:
+                        out[f"pier_{n}"].append((e.get("pier") or {}).get("status"))
+                    out[f"rig_{n}"].append(e.get("status"))
+                    out[f"rigd_{n}"].append(e.get("detail"))
         return jsonify(out)
 
     @app.route("/api/readings/<day>/<int:index>.json")
@@ -297,9 +329,11 @@ def create_app(cfg, loc, store, worker, sensor, settings):
 
     @app.route("/api/readings/<day>.csv")
     def api_readings_csv(day):
-        """Readings for a day as CSV, one row per capture.  ?grid=1 appends the
-        frame ambient/sky temps and the 32×24 matrix as columns r00c00..r23c31
-        (blank for records captured before grids were stored)."""
+        """Readings for a day as CSV, one row per capture.  With an observatory
+        configured, the roof state and each rig's pier / NINA status, pointing and
+        marker follow the readings.  ?grid=1 appends the frame ambient/sky temps
+        and the 32×24 matrix as columns r00c00..r23c31 (blank for records captured
+        before grids were stored)."""
         check_day(day)
         if store.readings_file(day) is None:
             abort(404)
@@ -309,11 +343,19 @@ def create_app(cfg, loc, store, worker, sensor, settings):
         def rows():
             buf = io.StringIO()
             w = csv.writer(buf)
-            w.writerow(["time"] + SCALAR_FIELDS +
+            obs_cols = (["roof"] + [f"{n}_{c}" for n in rig_labels for c, _ in RIG_CSV]
+                        if obs_rows else [])
+            w.writerow(["time"] + SCALAR_FIELDS + obs_cols +
                        (["frame_ambient", "frame_sky"] + grid_cols if grid else []))
             for rec in store.iter_readings(day):
                 r = rec.get("readings", {})
                 row = [rec["time"]] + ["" if r.get(k) is None else r[k] for k in SCALAR_FIELDS]
+                if obs_rows:
+                    obs = rec.get("observatory") or {}
+                    row.append(_blank(obs.get("roof")))
+                    for n in rig_labels:
+                        e = (obs.get("rigs") or {}).get(n) or {}
+                        row += [_blank(get(e)) for _, get in RIG_CSV]
                 if grid:
                     px = rec.get("pixels")
                     row += [_blank(rec.get("ambient")), _blank(rec.get("sky"))]

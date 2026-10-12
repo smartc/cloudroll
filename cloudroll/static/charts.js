@@ -35,6 +35,17 @@ const DataView = (() => {
     ['raining', 'Rain', v => v ? 'Raining' : 'Dry'],
   ];
   const P = { t: 10, r: 14, b: 22, l: 56 };
+  // Observatory states (roof, pier, NINA) in the status strip; unlisted
+  // states (offline, no data) are left empty.
+  const STATE = {
+    open: '#55efc4', closed: '#636e72', opening: '#fdcb6e', closing: '#fdcb6e',
+    error: '#e17055', unknown: '#e17055',
+    unparked: '#fdcb6e', parked: '#636e72',
+    capturing: '#00b894', tracking: '#74b9ff', slewing: '#fd79a8', focusing: '#ffeaa7',
+    calibrating: '#ffeaa7', waiting: '#a29bfe', idle: '#636e72', disconnected: '#636e72',
+  };
+  const LANE_H = 14;
+  let OBS = [];   // [{key, label, kind, detail?}] from the page
 
   let D = null, cfg = null, hover = -1, sel = -1, gapMs = Infinity, fmtTime = null;
   const tips = {};
@@ -198,6 +209,44 @@ const DataView = (() => {
     tooltip(el, g, hover, [[v ? C.wet : C.dry, 'Rain', v === null ? '--' : v ? 'Raining' : 'Dry']]);
   }
 
+  // ── observatory status strip: one lane per roof / pier / rig ─────────────
+  function drawObs() {
+    const el = document.getElementById('c-obs');
+    if (!el || !OBS.length) return;
+    el.dataset.h = P.t + OBS.length * LANE_H + P.b;
+    const g = setup(el);
+    const { ctx, W, H } = g;
+    ctx.fillStyle = C.plot; ctx.fillRect(0, 0, W, H);
+    const n = D.t.length;
+    OBS.forEach((row, lane) => {
+      const y = P.t + lane * LANE_H;
+      const vals = D[row.key] || [];
+      for (let i = 0; i < n; i++) {
+        const col = STATE[vals[i]];
+        if (!col) continue;
+        const x1 = xOf(g, i), x2 = i + 1 < n && D.t[i + 1] - D.t[i] <= gapMs ? xOf(g, i + 1) : x1 + 1;
+        ctx.fillStyle = col;
+        ctx.fillRect(x1, y + 2, Math.max(1, x2 - x1), LANE_H - 4);
+      }
+      ctx.fillStyle = C.axis; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(row.label, P.l - 4, y + LANE_H / 2 + 3);
+    });
+    timeAxis(g);
+    markers(g);
+    tooltip(el, g, hover, OBS.map(row => {
+      const v = hover >= 0 ? (D[row.key] || [])[hover] : null;
+      const d = row.detail && hover >= 0 ? (D[row.detail] || [])[hover] : null;
+      return [STATE[v] || C.grid, row.label, (v || '--') + (d ? ` (${d})` : '')];
+    }));
+  }
+
+  function obsLegend() {
+    if (!OBS.length) return;
+    const seen = new Set();
+    for (const row of OBS) for (const v of D[row.key] || []) if (STATE[v]) seen.add(v);
+    legend('leg-obs', Object.keys(STATE).filter(k => seen.has(k)).map(k => [STATE[k], k, true]));
+  }
+
   function tooltip(el, g, i, rows) {
     const tip = tips[el.id];
     if (i < 0) { tip.hidden = true; return; }
@@ -231,6 +280,7 @@ const DataView = (() => {
     if (!D || !D.t.length) return;
     CHARTS.forEach(drawLine);
     drawRain();
+    drawObs();
   }
 
   function setHover(i) { if (i !== hover) { hover = i; drawAll(); } }
@@ -254,7 +304,7 @@ const DataView = (() => {
       const tr = document.createElement('tr');
       const th = document.createElement('th'); th.textContent = label;
       const td = document.createElement('td'); const v = D[k][i];
-      td.textContent = v === null || v === undefined ? '--' : f(v);
+      td.textContent = v === null || v === undefined ? '--' : f(v, i);
       tr.append(th, td); return tr;
     }));
     try { history.replaceState(null, '', '#' + i); } catch (e) { /* ignore */ }
@@ -278,7 +328,7 @@ const DataView = (() => {
       const td0 = document.createElement('td'); td0.textContent = fmtTime.format(tt); tr.appendChild(td0);
       for (const [k, , f] of ROWS) {
         const td = document.createElement('td'); const v = D[k][i];
-        td.textContent = v === null || v === undefined ? '--' : f(v); td.className = 'num';
+        td.textContent = v === null || v === undefined ? '--' : f(v, i); td.className = 'num';
         tr.appendChild(td);
       }
       frag.appendChild(tr);
@@ -288,12 +338,19 @@ const DataView = (() => {
 
   async function init(options) {
     cfg = options;
+    OBS = cfg.obs || [];
+    for (const row of OBS) {
+      ROWS.push([row.key, row.label, row.detail
+        ? (v, i) => { const d = (D[row.detail] || [])[i]; return d ? `${v} (${d})` : v; }
+        : v => v]);
+    }
     fmtTime = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: cfg.tz });
     legend('leg-temp', CHARTS[0].series.map(s => [s.color, s.label]));
     legend('leg-rain', [[C.dry, 'Dry', true], [C.wet, 'Raining', true]]);
     D = await (await fetch(cfg.seriesUrl)).json();
     computeGap();
     drawAll();
+    obsLegend();
     updateTiles();
     const h = parseInt(location.hash.slice(1), 10);
     select(Number.isInteger(h) && h >= 0 && h < D.t.length ? h : D.t.length - 1);
@@ -358,6 +415,7 @@ const DataView = (() => {
         if (document.getElementById('tbl-details').open) buildTable(true);
       }
       updateTiles();
+      obsLegend();
       lastOk = Date.now();
       if (!u.open) {
         clearInterval(pollTimer); pollTimer = null;

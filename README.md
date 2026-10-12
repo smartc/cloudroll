@@ -197,6 +197,13 @@ Each pier (park sensor) and rig (NINA) has its own status:
 The Live page adds the running sequence item and the guider state, e.g.
 `Kepler: capturing (Take Exposure · guiding)`. Status is sampled once per capture.
 
+The Data page shows an **Observatory** strip (one lane each for the roof, every pier
+and every rig, coloured by state) and the same states in the record inspector and the
+table view. The day's **Download CSV** adds `roof` and, per rig, `<rig>_pier`,
+`<rig>_status`, `<rig>_detail`, `<rig>_ra_h`, `<rig>_dec_deg` (of date), `<rig>_alt_deg`,
+`<rig>_az_deg`, `<rig>_pa_deg` and `<rig>_marker` (1 if drawn); the raw and record JSON
+downloads carry the full `observatory` field.
+
 A rig gets a marker when its pier is `unparked` (or it has no park sensor), the roof is
 `open` and NINA reports the mount's position above the horizon. Without a `roof`, the
 roof is `unknown` and no markers are drawn.
