@@ -228,13 +228,21 @@ CAPTION_H = 28
 STALE = (225, 112, 85)     # #e17055
 
 
-def _caption(d, box, text, stale=False):
+def _caption(d, box, text, stale=False, badges=()):
     x, y = box[0] + 10, box[1] + CAPTION_H / 2 + 2
     f = _font(13, True)
     d.text((x, y), text.upper(), font=f, fill=LABEL, anchor="lm")
     if stale:
         d.text((x + d.textlength(text.upper(), font=f) + 10, y), "STALE", font=f,
                fill=STALE, anchor="lm")
+    # Status badges (roof, telescopes) right-aligned, separated by dots.
+    bx = box[2] - 10
+    for i, (btext, rgb) in enumerate(reversed(badges)):
+        if i:
+            bx -= d.textlength("  ·  ", font=f)
+            d.text((bx, y), "  ·  ", font=f, fill=MUTED, anchor="lm")
+        bx -= d.textlength(btext, font=f)
+        d.text((bx, y), btext, font=f, fill=rgb, anchor="lm")
 
 
 def _fit(img, w, h):
@@ -248,7 +256,7 @@ def _source_card(canvas, d, box, panel, aspect):
     A missing image becomes a placeholder of the source's usual shape."""
     x0, y0, x1, y1 = box
     d.rounded_rectangle(box, 8, fill=CARD)
-    _caption(d, box, panel.label, stale=panel.status == "stale")
+    _caption(d, box, panel.label, stale=panel.status == "stale", badges=panel.badges)
     aw, ah = x1 - x0 - 16, y1 - y0 - CAPTION_H - 8
     if panel.image is not None:
         im = _fit(panel.image, aw, ah)

@@ -13,7 +13,7 @@ import io
 import logging
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -37,6 +37,7 @@ class Fetched:
     status: str = "ok"              # "ok" | "stale" | "error: …"
     ext: str = "jpg"
     seconds: float = 0.0
+    badges: list = field(default_factory=list)   # [(text, rgb)] shown right of the caption
 
     @property
     def ok(self):

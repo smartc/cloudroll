@@ -5,7 +5,8 @@
   python -m cloudroll build [DATE] [--layout NAME|both]
                                      (re)build the timelapse for DATE (default: last finished
                                      window) in the given layout(s) (default: runtime setting)
-  python -m cloudroll info           show resolved location, windows and image sources
+  python -m cloudroll info           show resolved location, windows, image sources and
+                                     observatory status (read-only)
 """
 
 import argparse
@@ -13,6 +14,7 @@ import logging
 from datetime import datetime, timedelta
 
 from .config import load_config, resolve_location
+from .observatory import Observatory
 from .sensor import SensorClient
 from .settings import Settings
 from .sources import SourceClient
@@ -43,7 +45,8 @@ def main():
     sensor = SensorClient(cfg)
     sources = SourceClient(cfg)
     settings = Settings(cfg)
-    worker = Worker(cfg, loc, store, sensor, sources, settings)
+    observatory = Observatory(cfg, loc)
+    worker = Worker(cfg, loc, store, sensor, sources, settings, observatory)
     offset = cfg["timelapse"]["offset_after_sunrise_min"]
 
     if args.cmd == "info":
@@ -63,6 +66,15 @@ def main():
             size = f"{f.image.width}x{f.image.height} decoded, {len(f.data) / 1e3:.0f} KB" \
                 if f.ok else ""
             print(f"Source {src['name']:<12}: {f.status} in {f.seconds:.2f} s  {size}")
+        if observatory.enabled:
+            obs = observatory.read(datetime.now(loc.tz))
+            print(f"Roof     : {obs.roof}")
+            for r in obs.rigs:
+                where = (f"  RA {r.ra:.4f}h Dec {r.dec:+.3f} -> alt {r.alt:.1f} az {r.az:.1f}"
+                         + (f" PA {r.pa:.1f}" if r.pa is not None else "")) if r.ra is not None else ""
+                print(f"Rig {r.name:<15}: {r.status}{f' ({r.detail})' if r.detail else ''}{where}")
+            print(f"Markers  : {settings.scope_marker}"
+                  + ("" if observatory.lens else " (no lens model: status only)"))
         if cfg["layouts"]:
             print(f"Layouts  : {', '.join(cfg['layouts'])}  (dashboard default "
                   f"{settings.dashboard_default}; timelapse {', '.join(settings.timelapse_layouts)})")

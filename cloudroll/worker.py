@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from PIL import Image
@@ -26,9 +27,11 @@ def round_to_second(dt):
 
 
 class Worker:
-    def __init__(self, cfg, loc, store, sensor, sources, settings):
+    def __init__(self, cfg, loc, store, sensor, sources, settings, observatory=None):
         self.cfg, self.loc, self.store, self.sensor = cfg, loc, store, sensor
         self.sources, self.settings = sources, settings
+        self.observatory = observatory if observatory and observatory.enabled else None
+        self.last_observatory = None
         self.offset = cfg["timelapse"]["offset_after_sunrise_min"]
         self.last_error = None
         self.last_capture = None
@@ -38,7 +41,7 @@ class Worker:
         # Width/height of each source's last good image, so a missing image keeps
         # its usual shape in the layout.  Seeded from config "aspect" if given.
         self._aspects = {s["name"]: s["aspect"] for s in cfg["sources"] if s.get("aspect")}
-        n = len(cfg["sources"])
+        n = len(cfg["sources"]) + (1 if self.observatory else 0)
         self._pool = ThreadPoolExecutor(max_workers=n, thread_name_prefix="source") if n else None
 
     def source_aspect(self, name):
@@ -70,10 +73,14 @@ class Worker:
         # Cameras are fetched in parallel with the sensor reads; the observatory
         # snapshot alone can take ~5 s.
         futures = [self._pool.submit(self.sources.fetch, src) for src in self.cfg["sources"]]
+        obs_f = self._pool.submit(self.observatory.read, now) if self.observatory else None
         matrix = self.sensor.thermal_matrix()
         readings = self.sensor.readings()
         scale = self.color_scale()
         panels = [f.result() for f in futures]
+        obs = obs_f.result() if obs_f else None
+        if obs:
+            panels = [self._mark(p, obs, now) for p in panels]
         local = now.astimezone(self.loc.tz)
         wdate = window_date_for(self.loc, now, self.offset)
         title = self.cfg["web"]["title"]
@@ -96,6 +103,9 @@ class Worker:
             "readings": readings, "color_scale": scale,
             "ambient": matrix["ambient"], "sky": matrix["sky"], "pixels": matrix["pixels"],
         }
+        if obs:
+            record["observatory"] = obs.as_dict()
+            self.last_observatory = {**obs.as_dict(), "time": local.isoformat()}
         if panels:
             record["sources"] = {p.name: p.status for p in panels}
             self.last_sources = {p.name: {"status": p.status, "seconds": round(p.seconds, 2)}
@@ -104,6 +114,21 @@ class Worker:
         self.last_capture, self.last_error = local, None
         log.debug("Captured %s", path)
         return path
+
+    def _mark(self, panel, obs, when):
+        """The allsky panel with telescope markers and roof/rig status badges;
+        other panels unchanged.  The archived original stays unmarked."""
+        o = self.observatory
+        if panel.name != o.allsky:
+            return panel
+        src = next((s for s in self.cfg["sources"] if s["name"] == panel.name), {})
+        image = panel.image
+        if image is not None:
+            try:
+                image = o.draw(image, obs, when, self.settings.scope_marker, src.get("crop"))
+            except Exception:  # noqa: BLE001 – a drawing bug must not lose the capture
+                log.exception("Drawing telescope markers failed")
+        return replace(panel, image=image, badges=o.badges(obs))
 
     def layouts_to_build(self, layout=None):
         """Layouts to encode: an explicit one, 'both'/'all', or the runtime setting.
@@ -186,5 +211,7 @@ class Worker:
 
     def stop(self):
         self._stop.set()
+        if self.observatory:
+            self.observatory.stop()
         if self._pool:
             self._pool.shutdown(wait=False)

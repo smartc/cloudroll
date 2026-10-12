@@ -55,6 +55,15 @@ DEFAULTS = {
     # capture renders all of them.  Defaults to every source, in config order.
     "layouts": None,
     "source_timeout_sec": 15,
+    # Optional roof / park sensor status and telescope markers on the allsky image.
+    # Read-only: CloudRoll only ever GETs these devices.  See README "Observatory".
+    "observatory": {
+        "roof": None,               # {"url": ".../api/v1/dome/0"} (ASCOM Alpaca Dome)
+        "rigs": [],                 # [{name, label, nina, park_sensor, focal_length_mm, sensor, …}]
+        "allsky_source": "allsky",  # source the markers are drawn on
+        "lens": None,               # fisheye model of that source (see README)
+        "timeout_sec": 3,
+    },
 }
 
 
@@ -89,6 +98,7 @@ def load_config(path=CONFIG_PATH):
     cfg["data_dir"] = data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
     _check_sources(cfg)
+    _check_observatory(cfg)
     return cfg
 
 
@@ -108,6 +118,23 @@ def _check_sources(cfg):
     unknown = [n for n in cfg["layouts"] if n not in names]
     if unknown:
         raise SystemExit(f"config.json: layouts {unknown} don't match any source name")
+
+
+def _check_observatory(cfg):
+    oc = cfg["observatory"]
+    names = [r.get("name") for r in oc["rigs"]]
+    for r in oc["rigs"]:
+        if not r.get("name") or not re.fullmatch(r"[a-z0-9_-]+", r["name"]):
+            raise SystemExit(f"config.json: observatory rig name {r.get('name')!r} must be "
+                             "lowercase letters, digits, '-' or '_'")
+    if len(set(names)) != len(names):
+        raise SystemExit("config.json: observatory rig names must be unique")
+    lens = oc.get("lens")
+    if lens:
+        missing = [k for k in ("width", "height", "cx", "cy", "rot_deg", "k1", "k2", "k3")
+                   if k not in lens]
+        if missing:
+            raise SystemExit(f"config.json: observatory.lens is missing {missing}")
 
 
 def resolve_location(cfg):

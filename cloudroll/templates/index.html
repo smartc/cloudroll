@@ -15,6 +15,7 @@
     {% if worker.last_error %} · <span class="err">Last error: {{ worker.last_error }}</span>{% endif %}
   </div>
   <div id="source-status" class="status"></div>
+  <div id="observatory-status" class="status"></div>
   <div class="status">Current timelapse window: {{ window_start.strftime('%a %H:%M') }} → {{ window_end.strftime('%a %H:%M') }} (sunrise + {{ offset }} min)</div>
 </div>
 
@@ -39,10 +40,11 @@
   <p><a href="{{ url_for('timelapses') }}">All timelapses &rarr;</a></p>
 </div>
 
-{% if layouts|length > 1 %}
+{% if layouts|length > 1 or has_markers %}
 <div class="card">
-  <h2>Layout Settings</h2>
+  <h2>Settings</h2>
   <form id="settings-form" class="settings">
+    {% if layouts|length > 1 %}
     <fieldset>
       <legend>Dashboard default</legend>
       <p class="muted">Large image for browsers that haven't picked one with the buttons above.</p>
@@ -59,6 +61,17 @@
              {% if l.name in settings.timelapse_layouts %}checked{% endif %}> {{ l.label }} large</label>
       {% endfor %}
     </fieldset>
+    {% endif %}
+    {% if has_markers %}
+    <fieldset>
+      <legend>Telescope markers</legend>
+      <p class="muted">Drawn on the allsky image while a telescope is unparked under an open roof. Applies from the next capture.</p>
+      {% for value, text in [('ring', '2° ring'), ('fov', 'Field of view'), ('both', 'Both'), ('off', 'Off')] %}
+      <label><input type="radio" name="scope_marker" id="marker-{{ value }}" value="{{ value }}"
+             {% if settings.scope_marker == value %}checked{% endif %}> {{ text }}</label>
+      {% endfor %}
+    </fieldset>
+    {% endif %}
     <button type="submit" class="tbtn">Save settings</button>
     <span id="settings-msg" class="muted" role="status"></span>
   </form>
@@ -71,6 +84,7 @@
 const INTERVAL = {{ interval }} * 1000;
 const LATEST = "{{ url_for('media_latest') }}";
 const LABELS = {{ labels|tojson }};
+const RIG_LABELS = {{ rig_labels|tojson }};
 let lastTime = {{ (latest.time if latest else '')|tojson }};
 
 function refreshImages() {
@@ -95,6 +109,24 @@ function showSources(src) {
   });
 }
 
+function showObservatory(obs) {
+  const el = document.getElementById('observatory-status');
+  el.textContent = '';
+  if (!obs) return;
+  const roof = document.createElement('span');
+  roof.textContent = 'Roof: ' + obs.roof;
+  if (obs.roof === 'error' || obs.roof === 'unknown') roof.className = 'err';
+  el.append(roof);
+  Object.entries(obs.rigs || {}).forEach(([name, r]) => {
+    el.append(' · ');
+    const span = document.createElement('span');
+    span.textContent = `${RIG_LABELS[name] || name}: ${r.status}` + (r.detail ? ` (${r.detail})` : '');
+    if (r.alt !== undefined) span.title = `alt ${r.alt.toFixed(1)}°, az ${r.az.toFixed(1)}°` +
+                                          (r.pa !== undefined ? `, PA ${r.pa.toFixed(1)}°` : '');
+    el.append(span);
+  });
+}
+
 async function poll() {
   try {
     const r = await fetch("{{ url_for('api_latest') }}", {cache: "no-store"});
@@ -115,6 +147,7 @@ async function poll() {
       }
     }
     showSources(j.sources);
+    showObservatory(j.observatory);
   } catch (e) { /* server restarting – try again next tick */ }
 }
 setInterval(poll, Math.min(INTERVAL, 30000));
@@ -124,11 +157,15 @@ const form = document.getElementById('settings-form');
 if (form) form.addEventListener('submit', async e => {
   e.preventDefault();
   const msg = document.getElementById('settings-msg');
-  const body = {
-    dashboard_default: form.querySelector('[name=dashboard_default]:checked').value,
-    timelapse_layouts: [...form.querySelectorAll('[name=timelapse_layouts]:checked')].map(c => c.value),
-  };
-  if (!body.timelapse_layouts.length) { msg.textContent = 'Pick at least one timelapse layout.'; return; }
+  const body = {};
+  const dash = form.querySelector('[name=dashboard_default]:checked');
+  if (dash) {
+    body.dashboard_default = dash.value;
+    body.timelapse_layouts = [...form.querySelectorAll('[name=timelapse_layouts]:checked')].map(c => c.value);
+    if (!body.timelapse_layouts.length) { msg.textContent = 'Pick at least one timelapse layout.'; return; }
+  }
+  const marker = form.querySelector('[name=scope_marker]:checked');
+  if (marker) body.scope_marker = marker.value;
   try {
     const r = await fetch("{{ url_for('api_settings') }}", {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});

@@ -102,6 +102,7 @@ Copied from `config.example.json`; it holds your site's details and is not track
 | `sources` | Extra images for each frame – see below (empty = classic frames) |
 | `layouts` | Source names that each get a layout with themselves as the large image (default: all sources, in order) |
 | `source_timeout_sec` | Per-fetch timeout for image sources |
+| `observatory` | Optional roof and telescope status, and pointing markers on the allsky image – see below |
 
 ## Image sources
 
@@ -133,16 +134,93 @@ layout – one per source named in `layouts`, with that source large:
 
 ### Runtime settings
 
-The Live page has a layout switch (remembered per browser) and a **Layout Settings**
+The Live page has a layout switch (remembered per browser) and a **Settings**
 card, saved to `data/settings.json`:
 
 | Setting | Meaning |
 |---------|---------|
 | Dashboard default | Large image for browsers that haven't picked one |
 | Timelapse videos | Layouts encoded when a day is built; ticking several builds one MP4 each, switchable on the timelapse page |
+| Telescope markers | `ring` (2° circle), `fov` (the camera's field of view), `both` or `off`; applies from the next capture (only shown with `observatory.rigs`) |
 
 Like **Build now**, these controls have no login; if the site is reachable from outside
 your network, restrict `/api/` in the Apache vhost.
+
+## Observatory status and telescope markers
+
+With an `observatory` block, every capture also reads the roll-off roof, each
+telescope's park sensor and its mount position, and:
+
+* adds a status line to the allsky panel's caption (`ROOF OPEN · KEPLER TRACKING ·
+  MAGELLAN PARKED`) and to the Live page;
+* draws a marker on the allsky image where each active telescope points (a 2° ring,
+  the camera's field of view, or both – see Runtime settings);
+* stores the roof state and each rig's status, RA/Dec, alt/az and rotator angle in the
+  record's `observatory` field.
+
+The archived allsky originals stay unmarked; only the composite frames carry markers.
+
+**Read-only.** CloudRoll only sends HTTP `GET`s to an allow-list of status
+endpoints (below). It never sends anything that could move a mount, rotator or roof
+– not even an Alpaca `PUT connected`.
+
+| Device | Endpoint read |
+|--------|---------------|
+| Roof | ASCOM Alpaca Dome `…/dome/N/shutterstatus` (0 open, 1 closed, 2 opening, 3 closing, 4 error) |
+| Park sensor | ASCOM Alpaca Switch `…/switch/N/getswitch?Id=n` (e.g. a Dark Dragon Mount Park Sensor) |
+| Mount | [NINA Advanced API](https://github.com/christian-photo/ninaAPI) `GET /equipment/mount/info` (RA/Dec of date) |
+| Rotator | NINA Advanced API `GET /equipment/rotator/info` (`Position`, the sky angle) |
+
+A rig's status follows its park sensor and the roof first, NINA second:
+
+| Park sensor | Roof | NINA | Status | Marker |
+|-------------|------|------|--------|--------|
+| unreachable (powered down) | any | any | `offline` | no |
+| parked | any | any | `parked` | no |
+| unparked | not open | any | `unparked` (roof …) | no |
+| unparked | open | no position | `unparked` (no pointing) | no |
+| unparked | open | position | `tracking` / `slewing` / `idle` | yes |
+
+A rig without `park_sensor` skips the first two rows; without a `roof`, the roof is
+`unknown` and no markers are drawn.
+
+```json
+"observatory": {
+  "roof": {"url": "http://roof.example.com:11111/api/v1/dome/0"},
+  "allsky_source": "allsky",
+  "rigs": [
+    {
+      "name": "rig1",
+      "label": "Rig 1",
+      "nina": "http://rig1.example.com:1888/v2/api",
+      "park_sensor": {"url": "http://mps1.example.com/api/v1/switch/0", "id": 0, "parked_value": true},
+      "focal_length_mm": 1000,
+      "sensor": {"width_px": 6248, "height_px": 4176, "pixel_um": 3.76},
+      "color": "#ffd200",
+      "rotation_offset_deg": 0,
+      "flip": false
+    }
+  ],
+  "lens": {"width": 3552, "height": 3552, "cx": 1776, "cy": 1776, "rot_deg": 0,
+           "k1": 1268.5, "k2": -67.5, "k3": 0.44},
+  "timeout_sec": 3
+}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `roof.url` | Alpaca Dome device base URL |
+| `allsky_source` | Name of the source the markers are drawn on |
+| `rigs[].nina` | NINA Advanced API base (`http://host:1888/v2/api`); the plugin must be enabled and port 1888 reachable |
+| `rigs[].park_sensor` | Alpaca Switch base URL, switch `id`, and the `getswitch` value that means parked |
+| `rigs[].focal_length_mm`, `sensor` | Field of view (defaults: 1000 mm, ASI2600 6248×4176 at 3.76 µm) |
+| `rigs[].color` | Marker colour |
+| `rigs[].rotation_offset_deg`, `flip` | Match the rotator angle to the sky: the sensor's long side is drawn perpendicular to `Position + offset` (east of north), mirrored with `flip` |
+| `lens` | Fisheye model of the allsky camera: centre `cx`/`cy`, north rotation `rot_deg`, radius r = k1·z + k2·z³ + k3·z⁵ (pixels, zenith angle z in radians) at the original image's `width`×`height`; `lat`/`lon` override the location for the RA/Dec → alt/az conversion. Without a lens, only the status is shown |
+| `timeout_sec` | Per-request timeout; an unreachable device only costs this once per capture |
+
+`python -m cloudroll info` prints the current roof and rig status – a quick check
+that every device answers.
 
 ## Home Assistant card
 
@@ -184,9 +262,10 @@ The card reads `/api/info` (days, cameras, time zone) and the same
 
 ## Roadmap
 
-* **Scope markers on the allsky image** – for each frame, mark where each telescope is
-  pointing. Needs the mount's RA/Dec (or alt/az) captured with each frame from ASCOM
-  Alpaca or INDI, projected through the allsky lens calibration.
+* **Lens calibration tool** – fit the allsky `lens` model from a clear-night frame by
+  matching stars to a catalogue (currently a separate script).
+* **Telescope markers on the Home Assistant card** – draw them from the records'
+  `observatory` field over the original allsky images.
 
 ## License
 

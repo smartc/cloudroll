@@ -130,7 +130,10 @@ def create_app(cfg, loc, store, worker, sensor, settings):
                                timelapses=store.timelapse_list()[:4], worker=worker,
                                window_start=start, window_end=end, offset=offset,
                                interval=cfg["capture"]["interval_sec"],
-                               settings=settings.as_dict(), labels=labels)
+                               settings=settings.as_dict(), labels=labels,
+                               rig_labels={r["name"]: r.get("label") or r["name"].title()
+                                           for r in cfg["observatory"]["rigs"]},
+                               has_markers=bool(worker.observatory and worker.observatory.rigs))
 
     @app.route("/timelapses")
     def timelapses():
@@ -208,7 +211,8 @@ def create_app(cfg, loc, store, worker, sensor, settings):
     def api_latest():
         return jsonify({"meta": store.latest_meta(),
                         "last_error": worker.last_error,
-                        "sources": worker.last_sources})
+                        "sources": worker.last_sources,
+                        "observatory": worker.last_observatory})
 
     @app.route("/api/info")
     def api_info():

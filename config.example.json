@@ -81,5 +81,50 @@
       "url": "rtsp://user:pass@camera.example.com:554/h264Preview_01_main"
     }
   ],
-  "layouts": null
+  "layouts": null,
+  "observatory": {
+    "roof": null,
+    "allsky_source": "allsky",
+    "rigs": [],
+    "lens": null,
+    "timeout_sec": 3
+  },
+  "_observatory_example": {
+    "roof": {
+      "url": "http://roof.example.com:11111/api/v1/dome/0"
+    },
+    "allsky_source": "allsky",
+    "rigs": [
+      {
+        "name": "rig1",
+        "label": "Rig 1",
+        "nina": "http://rig1.example.com:1888/v2/api",
+        "park_sensor": {
+          "url": "http://mps1.example.com/api/v1/switch/0",
+          "id": 0,
+          "parked_value": true
+        },
+        "focal_length_mm": 1000,
+        "sensor": {
+          "width_px": 6248,
+          "height_px": 4176,
+          "pixel_um": 3.76
+        },
+        "color": "#ffd200",
+        "rotation_offset_deg": 0,
+        "flip": false
+      }
+    ],
+    "lens": {
+      "width": 3552,
+      "height": 3552,
+      "cx": 1776,
+      "cy": 1776,
+      "rot_deg": 0,
+      "k1": 1268.5,
+      "k2": -67.5,
+      "k3": 0.44
+    },
+    "timeout_sec": 3
+  }
 }
