@@ -170,6 +170,7 @@ endpoints (below). It never sends anything that could move a mount, rotator or r
 | Park sensor | ASCOM Alpaca Switch `…/switch/N/getswitch?Id=n` (e.g. a Dark Dragon Mount Park Sensor) |
 | Mount | [NINA Advanced API](https://github.com/christian-photo/ninaAPI) `GET /equipment/mount/info` (RA/Dec of date) |
 | Rotator | NINA Advanced API `GET /equipment/rotator/info` (`Position`, the sky angle) |
+| Camera, guider, focuser | NINA Advanced API `GET /equipment/{camera,guider,focuser}/info` (`IsExposing`, `State`, `IsMoving`) |
 | Sequence | NINA Advanced API `GET /sequence/json` (which item is running) |
 
 NINA's API also performs actions with `GET` (`sequence/start`, `mount/slew`, …), so
@@ -182,12 +183,19 @@ Each pier (park sensor) and rig (NINA) has its own status:
 | `offline` | park sensor unreachable – usually powered down |
 | `parked` / `unparked` | as the sensor reports |
 
-| Rig | Meaning |
+| Rig (first match) | Meaning |
 |-----|---------|
 | `offline` | NINA's API unreachable |
-| `slewing` / `tracking` | mount state |
-| `waiting` | a sequence is running but the mount isn't tracking; the running item (e.g. "Wait for Time") is shown on the Live page |
+| `slewing` | mount slewing (goto, centering, meridian flip) |
+| `focusing` | an autofocus sequence item is running, or the focuser is moving |
+| `calibrating` | guider calibrating |
+| `capturing` | mount tracking and the camera exposing (plate-solve frames included) |
+| `tracking` | mount tracking between exposures (download, dither, settle) |
+| `waiting` | a sequence is running but the mount isn't tracking (e.g. "Wait for Time") |
 | `parked` / `idle` / `disconnected` | no sequence running; mount parked, unparked but not tracking, or not connected |
+
+The Live page adds the running sequence item and the guider state, e.g.
+`Kepler: capturing (Take Exposure · guiding)`. Status is sampled once per capture.
 
 A rig gets a marker when its pier is `unparked` (or it has no park sensor), the roof is
 `open` and NINA reports the mount's position above the horizon. Without a `roof`, the

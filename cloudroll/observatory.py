@@ -3,12 +3,12 @@
 Each capture reads, in parallel:
   roof          ASCOM Alpaca Dome  .../dome/N/shutterstatus
   park sensors  ASCOM Alpaca Switch .../switch/N/getswitch (one per rig)
-  rigs          NINA Advanced API   /equipment/mount/info, /equipment/rotator/info,
+  rigs          NINA Advanced API   /equipment/{mount,rotator,camera,guider,focuser}/info,
                                     /sequence/json
 
 A pier's status comes from its park sensor (offline / parked / unparked), a
-rig's from NINA (offline / slewing / tracking / waiting / parked / idle /
-disconnected).  A rig gets a marker when its pier is unparked, the roof is open
+rig's from NINA (offline / slewing / focusing / calibrating / capturing /
+tracking / waiting / parked / idle / disconnected).  A rig gets a marker when its pier is unparked, the roof is open
 and NINA reports a position.
 
 READ-ONLY: everything here is an HTTP GET to an allow-listed endpoint.  This
@@ -34,13 +34,15 @@ log = logging.getLogger(__name__)
 
 # The only requests this module may make, all GET.  Anything else is refused.
 ALLOWED = {
-    "nina": ("equipment/mount/info", "equipment/rotator/info", "sequence/json", "version"),
+    "nina": ("equipment/mount/info", "equipment/rotator/info", "equipment/camera/info",
+             "equipment/guider/info", "equipment/focuser/info", "sequence/json", "version"),
     "switch": ("getswitch",),
     "dome": ("shutterstatus",),
 }
 
 SHUTTER = {0: "open", 1: "closed", 2: "opening", 3: "closing", 4: "error"}
-ACTIVE = ("tracking", "slewing", "waiting")   # rig states drawn in the rig's colour
+# Rig states drawn in the rig's colour (the rest are muted).
+ACTIVE = ("slewing", "focusing", "calibrating", "capturing", "tracking", "waiting")
 DEFAULT_SENSOR = {"width_px": 6248, "height_px": 4176, "pixel_um": 3.76}   # ASI2600
 DEFAULT_FOCAL_MM = 1000.0
 COLOURS = ["#ffd200", "#00dcff", "#ff5ac8", "#78ff78"]
@@ -52,8 +54,8 @@ MUTED_RGB = (178, 190, 195)
 class RigState:
     name: str
     label: str
-    status: str = "offline"     # NINA: offline | slewing | tracking | waiting | parked | idle | disconnected
-    detail: str = ""            # running sequence item, e.g. "Wait for Time"
+    status: str = "offline"     # NINA, see _nina()
+    detail: str = ""            # running sequence item and guider state, e.g. "Take Exposure · guiding"
     pier_label: str = ""        # e.g. "Pier 1"; empty without a park sensor
     pier: str | None = None     # park sensor: offline | parked | unparked
     ra: float | None = None     # hours, JNOW
@@ -191,19 +193,30 @@ class Observatory:
             st.status = "offline"
             return
         running = self._running_item(rig)
+        cam = self._info(rig, "camera")
+        guider = self._info(rig, "guider")
+        focuser = self._info(rig, "focuser")
+        gstate = str(guider.get("State") or "") if guider.get("Connected") else ""
+        tracking = m.get("TrackingEnabled") and not m.get("AtPark")
+        # Highest priority first.
         if not m.get("Connected"):
             st.status = "waiting" if running else "disconnected"
-            st.detail = running or ""
-            return
-        if m.get("Slewing"):
+        elif m.get("Slewing"):
             st.status = "slewing"
-        elif m.get("TrackingEnabled") and not m.get("AtPark"):
-            st.status = "tracking"
+        elif "autofocus" in (running or "").lower().replace(" ", "") or focuser.get("IsMoving"):
+            st.status = "focusing"
+        elif gstate.lower() == "calibrating":
+            st.status = "calibrating"
+        elif tracking:
+            st.status = "capturing" if cam.get("IsExposing") else "tracking"
         elif running:
             st.status = "waiting"
         else:
             st.status = "parked" if m.get("AtPark") else "idle"
-        st.detail = running or ""
+        g = "" if gstate.lower() in ("", "stopped") else re.sub(r"(?<!^)(?=[A-Z])", " ", gstate).lower()
+        st.detail = " · ".join(x for x in (running, g) if x)
+        if not m.get("Connected"):
+            return
         if m.get("AtPark"):
             return              # no pointing worth drawing
         st.ra, st.dec = float(m["RightAscension"]), float(m["Declination"])
@@ -214,6 +227,14 @@ class Observatory:
                 st.pa = float(r["Position"])
         except Exception as e:  # noqa: BLE001 – no rotator: FOV drawn unrotated
             log.debug("NINA rotator %s failed: %s", rig["name"], e)
+
+    def _info(self, rig, device):
+        """NINA's info for camera / guider / focuser, or {} if unavailable."""
+        try:
+            return self.client.nina(rig["nina"], f"equipment/{device}/info") or {}
+        except Exception as e:  # noqa: BLE001
+            log.debug("NINA %s %s: %s", rig["name"], device, e)
+            return {}
 
     def _running_item(self, rig):
         """Name of the innermost RUNNING sequence item, or None if no sequence runs."""
