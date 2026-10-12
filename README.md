@@ -170,19 +170,28 @@ endpoints (below). It never sends anything that could move a mount, rotator or r
 | Park sensor | ASCOM Alpaca Switch `…/switch/N/getswitch?Id=n` (e.g. a Dark Dragon Mount Park Sensor) |
 | Mount | [NINA Advanced API](https://github.com/christian-photo/ninaAPI) `GET /equipment/mount/info` (RA/Dec of date) |
 | Rotator | NINA Advanced API `GET /equipment/rotator/info` (`Position`, the sky angle) |
+| Sequence | NINA Advanced API `GET /sequence/json` (which item is running) |
 
-A rig's status follows its park sensor and the roof first, NINA second:
+NINA's API also performs actions with `GET` (`sequence/start`, `mount/slew`, …), so
+the allow-list names exact read-only paths.
 
-| Park sensor | Roof | NINA | Status | Marker |
-|-------------|------|------|--------|--------|
-| unreachable (powered down) | any | any | `offline` | no |
-| parked | any | any | `parked` | no |
-| unparked | not open | any | `unparked` (roof …) | no |
-| unparked | open | no position | `unparked` (no pointing) | no |
-| unparked | open | position | `tracking` / `slewing` / `idle` | yes |
+Each pier (park sensor) and rig (NINA) has its own status:
 
-A rig without `park_sensor` skips the first two rows; without a `roof`, the roof is
-`unknown` and no markers are drawn.
+| Pier | Meaning |
+|------|---------|
+| `offline` | park sensor unreachable – usually powered down |
+| `parked` / `unparked` | as the sensor reports |
+
+| Rig | Meaning |
+|-----|---------|
+| `offline` | NINA's API unreachable |
+| `slewing` / `tracking` | mount state |
+| `waiting` | a sequence is running but the mount isn't tracking; the running item (e.g. "Wait for Time") is shown on the Live page |
+| `parked` / `idle` / `disconnected` | no sequence running; mount parked, unparked but not tracking, or not connected |
+
+A rig gets a marker when its pier is `unparked` (or it has no park sensor), the roof is
+`open` and NINA reports the mount's position above the horizon. Without a `roof`, the
+roof is `unknown` and no markers are drawn.
 
 ```json
 "observatory": {
@@ -193,7 +202,8 @@ A rig without `park_sensor` skips the first two rows; without a `roof`, the roof
       "name": "rig1",
       "label": "Rig 1",
       "nina": "http://rig1.example.com:1888/v2/api",
-      "park_sensor": {"url": "http://mps1.example.com/api/v1/switch/0", "id": 0, "parked_value": true},
+      "park_sensor": {"url": "http://mps1.example.com/api/v1/switch/0", "id": 0, "parked_value": true,
+                      "label": "Pier 1"},
       "focal_length_mm": 1000,
       "sensor": {"width_px": 6248, "height_px": 4176, "pixel_um": 3.76},
       "color": "#ffd200",
@@ -212,7 +222,7 @@ A rig without `park_sensor` skips the first two rows; without a `roof`, the roof
 | `roof.url` | Alpaca Dome device base URL |
 | `allsky_source` | Name of the source the markers are drawn on |
 | `rigs[].nina` | NINA Advanced API base (`http://host:1888/v2/api`); the plugin must be enabled and port 1888 reachable |
-| `rigs[].park_sensor` | Alpaca Switch base URL, switch `id`, and the `getswitch` value that means parked |
+| `rigs[].park_sensor` | Alpaca Switch base URL, switch `id`, the `getswitch` value that means parked, and the pier's `label` |
 | `rigs[].focal_length_mm`, `sensor` | Field of view (defaults: 1000 mm, ASI2600 6248×4176 at 3.76 µm) |
 | `rigs[].color` | Marker colour |
 | `rigs[].rotation_offset_deg`, `flip` | Match the rotator angle to the sky: the sensor's long side is drawn perpendicular to `Position + offset` (east of north), mirrored with `flip` |

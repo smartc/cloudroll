@@ -118,6 +118,7 @@ function showObservatory(obs) {
   if (obs.roof === 'error' || obs.roof === 'unknown') roof.className = 'err';
   el.append(roof);
   Object.entries(obs.rigs || {}).forEach(([name, r]) => {
+    if (r.pier) el.append(` · ${r.pier.label}: ${r.pier.status}`);
     el.append(' · ');
     const span = document.createElement('span');
     span.textContent = `${RIG_LABELS[name] || name}: ${r.status}` + (r.detail ? ` (${r.detail})` : '');

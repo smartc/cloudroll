@@ -3,16 +3,20 @@
 Each capture reads, in parallel:
   roof          ASCOM Alpaca Dome  .../dome/N/shutterstatus
   park sensors  ASCOM Alpaca Switch .../switch/N/getswitch (one per rig)
-  mounts        NINA Advanced API   /equipment/mount/info, /equipment/rotator/info
+  rigs          NINA Advanced API   /equipment/mount/info, /equipment/rotator/info,
+                                    /sequence/json
 
-and works out each rig's status.  The park sensor and roof decide whether a
-session is under way; NINA only supplies the pointing.  A rig gets a marker
-when its park sensor says unparked, the roof is open and NINA reports a
-position.
+A pier's status comes from its park sensor (offline / parked / unparked), a
+rig's from NINA (offline / slewing / tracking / waiting / parked / idle /
+disconnected).  A rig gets a marker when its pier is unparked, the roof is open
+and NINA reports a position.
 
 READ-ONLY: everything here is an HTTP GET to an allow-listed endpoint.  This
 code must never send anything that could move a telescope, rotator or the
-roof (no PUT, no slew/park/unpark, not even Alpaca "connected").
+roof (no PUT, no slew/park/unpark, not even Alpaca "connected").  Note that
+NINA's Advanced API does actions with GET too (sequence/start, mount/slew…),
+so the allow-list names exact read-only paths; check the API source before
+adding one.
 """
 
 import logging
@@ -30,25 +34,28 @@ log = logging.getLogger(__name__)
 
 # The only requests this module may make, all GET.  Anything else is refused.
 ALLOWED = {
-    "nina": ("equipment/mount/info", "equipment/rotator/info", "version"),
+    "nina": ("equipment/mount/info", "equipment/rotator/info", "sequence/json", "version"),
     "switch": ("getswitch",),
     "dome": ("shutterstatus",),
 }
 
 SHUTTER = {0: "open", 1: "closed", 2: "opening", 3: "closing", 4: "error"}
-ACTIVE = ("tracking", "slewing", "idle")      # NINA states that get a marker
+ACTIVE = ("tracking", "slewing", "waiting")   # rig states drawn in the rig's colour
 DEFAULT_SENSOR = {"width_px": 6248, "height_px": 4176, "pixel_um": 3.76}   # ASI2600
 DEFAULT_FOCAL_MM = 1000.0
 COLOURS = ["#ffd200", "#00dcff", "#ff5ac8", "#78ff78"]
 RING_DEG = 2.0
+MUTED_RGB = (178, 190, 195)
 
 
 @dataclass
 class RigState:
     name: str
     label: str
-    status: str = "offline"     # offline | parked | unparked | tracking | slewing | idle
-    detail: str = ""            # e.g. "roof closed", "no pointing", "NINA says parked"
+    status: str = "offline"     # NINA: offline | slewing | tracking | waiting | parked | idle | disconnected
+    detail: str = ""            # running sequence item, e.g. "Wait for Time"
+    pier_label: str = ""        # e.g. "Pier 1"; empty without a park sensor
+    pier: str | None = None     # park sensor: offline | parked | unparked
     ra: float | None = None     # hours, JNOW
     dec: float | None = None    # degrees, JNOW
     pa: float | None = None     # rotator sky angle, degrees
@@ -58,10 +65,13 @@ class RigState:
 
     def as_dict(self):
         d = {"status": self.status}
+        if self.pier:
+            d["pier"] = {"label": self.pier_label, "status": self.pier}
         for k in ("detail", "ra", "dec", "pa", "alt", "az"):
             v = getattr(self, k)
             if v not in (None, ""):
                 d[k] = round(v, 5) if isinstance(v, float) else v
+        d["marker"] = self.marker
         return d
 
 
@@ -130,22 +140,27 @@ class Observatory:
     def read(self, when):
         """One status snapshot.  Never raises."""
         roof_f = self._pool.submit(self._roof)
-        rig_fs = [self._pool.submit(self._park, r) for r in self.rigs]
+        rig_fs = [self._pool.submit(self._rig, r, when) for r in self.rigs]
         state = ObservatoryState(roof=roof_f.result())
-        for rig, f in zip(self.rigs, rig_fs):
-            st = RigState(rig["name"], self.label(rig))
-            parked = f.result()
-            if parked is None:
-                st.status = "offline"
-            elif parked:
-                st.status = "parked"
-            elif state.roof != "open":
-                st.status, st.detail = "unparked", f"roof {state.roof}"
-            else:
-                self._pointing(rig, st, when)
+        for f in rig_fs:
+            st = f.result()
+            # A marker needs the pier unparked (or no sensor), an open roof and a position.
+            st.marker = (st.pier in (None, "unparked") and state.roof == "open"
+                         and st.alt is not None and st.alt > 0)
             state.rigs.append(st)
         self._log_changes(state)
         return state
+
+    def _rig(self, rig, when):
+        st = RigState(rig["name"], self.label(rig))
+        if rig.get("park_sensor"):
+            ps = rig["park_sensor"]
+            st.pier_label = ps.get("label") or "Pier"
+            parked = self._park(rig)
+            st.pier = "offline" if parked is None else "parked" if parked else "unparked"
+        if rig.get("nina"):
+            self._nina(rig, st, when)
+        return st
 
     def _roof(self):
         roof = self.cfg.get("roof")
@@ -160,9 +175,7 @@ class Observatory:
 
     def _park(self, rig):
         """True parked, False unparked, None sensor unreachable (powered down)."""
-        ps = rig.get("park_sensor")
-        if not ps:
-            return False        # no sensor: let NINA decide
+        ps = rig["park_sensor"]
         try:
             v = self.client.alpaca("switch", ps["url"], "getswitch", {"Id": ps.get("id", 0)})
             return bool(v) == bool(ps.get("parked_value", True))
@@ -170,28 +183,31 @@ class Observatory:
             log.debug("Park sensor %s failed: %s", rig["name"], e)
             return None
 
-    def _pointing(self, rig, st, when):
-        st.status = "unparked"
-        if not rig.get("nina"):
-            st.detail = "no pointing"
-            return
+    def _nina(self, rig, st, when):
         try:
             m = self.client.nina(rig["nina"], "equipment/mount/info")
-        except Exception as e:  # noqa: BLE001
-            st.detail = "no pointing"
+        except Exception as e:  # noqa: BLE001 – NINA not running / API off
             log.debug("NINA %s failed: %s", rig["name"], e)
+            st.status = "offline"
             return
+        running = self._running_item(rig)
         if not m.get("Connected"):
-            st.detail = "no pointing"
+            st.status = "waiting" if running else "disconnected"
+            st.detail = running or ""
             return
+        if m.get("Slewing"):
+            st.status = "slewing"
+        elif m.get("TrackingEnabled") and not m.get("AtPark"):
+            st.status = "tracking"
+        elif running:
+            st.status = "waiting"
+        else:
+            st.status = "parked" if m.get("AtPark") else "idle"
+        st.detail = running or ""
         if m.get("AtPark"):
-            st.detail = "NINA says parked"
-            return
-        st.status = ("slewing" if m.get("Slewing")
-                     else "tracking" if m.get("TrackingEnabled") else "idle")
+            return              # no pointing worth drawing
         st.ra, st.dec = float(m["RightAscension"]), float(m["Declination"])
         st.alt, st.az = radec_to_altaz(st.ra, st.dec, when, self.lat, self.lon)
-        st.marker = st.alt > 0
         try:
             r = self.client.nina(rig["nina"], "equipment/rotator/info")
             if r.get("Connected") and r.get("Position") is not None:
@@ -199,22 +215,45 @@ class Observatory:
         except Exception as e:  # noqa: BLE001 – no rotator: FOV drawn unrotated
             log.debug("NINA rotator %s failed: %s", rig["name"], e)
 
+    def _running_item(self, rig):
+        """Name of the innermost RUNNING sequence item, or None if no sequence runs."""
+        try:
+            tree = self.client.nina(rig["nina"], "sequence/json")
+        except Exception as e:  # noqa: BLE001 – sequencer not initialised (409) etc.
+            log.debug("NINA sequence %s: %s", rig["name"], e)
+            return None
+
+        def deepest(items):
+            for it in items or []:
+                if isinstance(it, dict) and it.get("Status") == "RUNNING":
+                    inner = deepest(it.get("Items"))
+                    name = str(it.get("Name", "")).removesuffix("_Container")
+                    return inner or name or "running"
+            return None
+        return deepest(tree if isinstance(tree, list) else [])
+
     def _log_changes(self, state):
         with self._lock:
             for key, val in [("roof", (state.roof, ""))] + \
-                    [(r.name, (r.status, r.detail)) for r in state.rigs]:
+                    [(r.name, (r.status, r.detail, r.pier)) for r in state.rigs]:
                 if self._last.get(key) != val:
                     if key in self._last:
-                        log.info("Observatory: %s %s%s", key, val[0],
-                                 f" ({val[1]})" if val[1] else "")
+                        log.info("Observatory: %s %s%s%s", key, val[0],
+                                 f" ({val[1]})" if val[1] else "",
+                                 f", pier {val[2]}" if len(val) > 2 and val[2] else "")
                     self._last[key] = val
 
     # -- drawing ------------------------------------------------------------
     def badges(self, state):
-        """Caption text segments [(text, rgb)] for the allsky card."""
+        """Caption text segments [(text, rgb[, short text])] for the allsky card."""
         out = [(f"ROOF {state.roof.upper()}", _roof_rgb(state.roof))]
         for i, r in enumerate(state.rigs):
-            rgb = _hex(self.colour(i)) if r.status in ACTIVE else (178, 190, 195)
+            if r.pier:
+                short = re.sub(r"^PIER\s*", "P", r.pier_label.upper())
+                out.append((f"{r.pier_label.upper()} {r.pier.upper()}",
+                            (253, 203, 110) if r.pier == "unparked" else MUTED_RGB,
+                            f"{short} {r.pier.upper()}"))
+            rgb = _hex(self.colour(i)) if r.status in ACTIVE else MUTED_RGB
             out.append((f"{r.label.upper()} {r.status.upper()}", rgb))
         return out
 

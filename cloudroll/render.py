@@ -235,14 +235,30 @@ def _caption(d, box, text, stale=False, badges=()):
     if stale:
         d.text((x + d.textlength(text.upper(), font=f) + 10, y), "STALE", font=f,
                fill=STALE, anchor="lm")
-    # Status badges (roof, telescopes) right-aligned, separated by dots.
+    if not badges:
+        return
+    # Status badges (roof, telescopes) right-aligned, separated by dots.  Each is
+    # (text, rgb) or (text, rgb, short text); in a narrow card the font shrinks,
+    # then the short texts are used.
+    room = box[2] - x - d.textlength(text.upper(), font=f) - 30
+    sep = "  ·  "
+    for short in (False, True):
+        texts = [b[2] if short and len(b) > 2 else b[0] for b in badges]
+        for size in range(13, 8, -1):
+            bf = _font(size, True)
+            width = sum(d.textlength(t, font=bf) for t in texts) + \
+                d.textlength(sep, font=bf) * (len(texts) - 1)
+            if width <= room:
+                break
+        if width <= room:
+            break
     bx = box[2] - 10
-    for i, (btext, rgb) in enumerate(reversed(badges)):
+    for i, (btext, b) in enumerate(zip(reversed(texts), reversed(badges))):
         if i:
-            bx -= d.textlength("  ·  ", font=f)
-            d.text((bx, y), "  ·  ", font=f, fill=MUTED, anchor="lm")
-        bx -= d.textlength(btext, font=f)
-        d.text((bx, y), btext, font=f, fill=rgb, anchor="lm")
+            bx -= d.textlength(sep, font=bf)
+            d.text((bx, y), sep, font=bf, fill=MUTED, anchor="lm")
+        bx -= d.textlength(btext, font=bf)
+        d.text((bx, y), btext, font=bf, fill=b[1], anchor="lm")
 
 
 def _fit(img, w, h):

@@ -72,7 +72,10 @@ def main():
             for r in obs.rigs:
                 where = (f"  RA {r.ra:.4f}h Dec {r.dec:+.3f} -> alt {r.alt:.1f} az {r.az:.1f}"
                          + (f" PA {r.pa:.1f}" if r.pa is not None else "")) if r.ra is not None else ""
-                print(f"Rig {r.name:<15}: {r.status}{f' ({r.detail})' if r.detail else ''}{where}")
+                pier = f"{r.pier_label} {r.pier}, " if r.pier else ""
+                print(f"Rig {r.name:<15}: {pier}NINA {r.status}"
+                      f"{f' ({r.detail})' if r.detail else ''}{where}"
+                      f"{'  [marker]' if r.marker else ''}")
             print(f"Markers  : {settings.scope_marker}"
                   + ("" if observatory.lens else " (no lens model: status only)"))
         if cfg["layouts"]:
