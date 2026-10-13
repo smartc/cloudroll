@@ -235,10 +235,15 @@ def create_app(cfg, loc, store, worker, sensor, settings):
     # -- API ----------------------------------------------------------------
     @app.route("/api/latest")
     def api_latest():
-        return jsonify({"meta": store.latest_meta(),
+        meta = store.latest_meta()
+        # Right after a restart the worker has no status yet: use the last record's.
+        obs = worker.last_observatory
+        if obs is None and meta and meta.get("observatory"):
+            obs = {**meta["observatory"], "time": meta.get("time")}
+        return jsonify({"meta": meta,
                         "last_error": worker.last_error,
                         "sources": worker.last_sources,
-                        "observatory": worker.last_observatory})
+                        "observatory": obs})
 
     @app.route("/api/info")
     def api_info():
