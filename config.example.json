@@ -91,7 +91,8 @@
   },
   "_observatory_example": {
     "roof": {
-      "url": "http://roof.example.com:11111/api/v1/dome/0"
+      "url": "http://roof.example.com:11111/api/v1/dome/0",
+      "link": "http://roof.example.com/"
     },
     "allsky_source": "allsky",
     "rigs": [

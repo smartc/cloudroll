@@ -52,6 +52,8 @@ def create_app(cfg, loc, store, worker, sensor, settings):
     labels = {s["name"]: s.get("label") or s["name"].title() for s in cfg["sources"]}
     layouts = [{"name": n, "label": labels[n]} for n in cfg["layouts"]]
     rigs = cfg["observatory"]["rigs"]
+    roof = cfg["observatory"].get("roof") or {}
+    roof_link = [{"label": roof.get("label") or "Roof", "url": roof["link"]}] if roof.get("link") else []
     rig_labels = {r["name"]: r.get("label") or r["name"].title() for r in rigs}
     pier_labels = {r["name"]: (r["park_sensor"].get("label") or "Pier")
                    for r in rigs if r.get("park_sensor")}
@@ -120,7 +122,7 @@ def create_app(cfg, loc, store, worker, sensor, settings):
                 "static_url": static_url,
                 "sensor_url": sensor.web_url(), "layouts": layouts,
                 "source_links": [{"label": s.get("label") or s["name"].title(), "url": s["link"]}
-                                 for s in cfg["sources"] if s.get("link")],
+                                 for s in cfg["sources"] if s.get("link")] + roof_link,
                 "layout_cfg": {"layouts": cfg["layouts"],
                                "default": settings.dashboard_default}}
 
