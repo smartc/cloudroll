@@ -202,7 +202,10 @@ def create_app(cfg, loc, store, worker, sensor, settings):
                                       "aspect": round(worker.source_aspect(n), 4)}
                                      for n, lb in labels.items()],
                                frames_days=cfg["retention"]["frames_days"],
-                               obs_rows=obs_rows)
+                               obs_rows=obs_rows,
+                               marked_source=(worker.observatory.allsky
+                                              if worker.observatory and worker.observatory.lens
+                                              else None))
 
     @app.route("/timelapse/<day>")
     def timelapse(day):
@@ -416,6 +419,18 @@ def create_app(cfg, loc, store, worker, sensor, settings):
             abort(404)
         return send_from_directory(path.parent, name, max_age=86400)
 
+    def record_observatory(day, frame):
+        """(capture time, "observatory" field) of the record whose frame is
+        `frame`, or None.  Searches the day's cached lines from the end."""
+        needles = (f'"frame":"{frame}"', f'"frame": "{frame}"')   # compact as stored, or spaced
+        for line in reversed(store.reading_lines(day) or []):
+            if any(n in line for n in needles):
+                rec = json.loads(line)
+                if rec.get("observatory"):
+                    return datetime.fromisoformat(rec["time"]), rec["observatory"]
+                return None
+        return None
+
     @app.route("/media/sources/<day>/<source>/<name>")
     def media_source(day, source, name):
         """A source's original image as fetched (kept for retention.frames_days)."""
@@ -430,14 +445,26 @@ def create_app(cfg, loc, store, worker, sensor, settings):
             if path is None or not SOURCE_RE.match(path.name):
                 abort(404)
         w = request.args.get("w", type=int)
-        if not w:
+        # ?markers=1 on the allsky source: telescope markers drawn from the
+        # matching record (the stored original stays unmarked).
+        obs = worker.observatory
+        rec_obs = None
+        if request.args.get("markers") and obs and obs.lens and source == obs.allsky:
+            rec_obs = record_observatory(day, Path(name).stem + ".jpg")
+        if not w and rec_obs is None:
             return send_from_directory(folder, path.name, max_age=86400)
         # Downscaled copy for the data page: originals are up to 4K / ~600 KB.
-        w = min(SOURCE_WIDTHS, key=lambda v: abs(v - w))
+        if w:
+            w = min(SOURCE_WIDTHS, key=lambda v: abs(v - w))
         with Image.open(path) as im:
-            im.draft("RGB", (w, w))
+            if w:
+                im.draft("RGB", (w, w))
             im = im.convert("RGB")
-            if im.width > w:
+            if rec_obs is not None:
+                rec_time, rec_o = rec_obs
+                im = obs.draw(im, obs.state_from_record(rec_o), rec_time,
+                              rec_o.get("style") or settings.scope_marker)
+            if w and im.width > w:
                 im = im.resize((w, round(im.height * w / im.width)), Image.LANCZOS)
             buf = io.BytesIO()
             im.save(buf, "JPEG", quality=85)

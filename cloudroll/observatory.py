@@ -265,6 +265,22 @@ class Observatory:
                     self._last[key] = val
 
     # -- drawing ------------------------------------------------------------
+    def state_from_record(self, obs):
+        """ObservatoryState rebuilt from a record's "observatory" field, for
+        drawing markers on archived images."""
+        state = ObservatoryState(roof=obs.get("roof") or "unknown")
+        rigs = obs.get("rigs") or {}
+        for rig in self.rigs:
+            e = rigs.get(rig["name"]) or {}
+            pier = e.get("pier") or {}
+            state.rigs.append(RigState(
+                rig["name"], self.label(rig), status=e.get("status") or "offline",
+                detail=e.get("detail") or "", pier_label=pier.get("label") or "",
+                pier=pier.get("status"), ra=e.get("ra"), dec=e.get("dec"), pa=e.get("pa"),
+                alt=e.get("alt"), az=e.get("az"),
+                marker=bool(e.get("marker")) and e.get("ra") is not None))
+        return state
+
     def badges(self, state):
         """Caption text segments [(text, rgb[, short text])] for the allsky card."""
         out = [(f"ROOF {state.roof.upper()}", _roof_rgb(state.roof))]

@@ -104,7 +104,7 @@ class Worker:
             "ambient": matrix["ambient"], "sky": matrix["sky"], "pixels": matrix["pixels"],
         }
         if obs:
-            record["observatory"] = obs.as_dict()
+            record["observatory"] = {**obs.as_dict(), "style": self.settings.scope_marker}
             self.last_observatory = {**obs.as_dict(), "time": local.isoformat()}
         if panels:
             record["sources"] = {p.name: p.status for p in panels}

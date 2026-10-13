@@ -102,6 +102,7 @@
 const CAMS = {{ cams|tojson }};
 const SRC_BASE = {{ url_for('media_source', day=day, source='_', name='x.jpg')[:-7]|tojson }};
 const KEEP_DAYS = {{ frames_days|tojson }};
+const MARKED = {{ marked_source|tojson }};   // source shown with telescope markers
 const recTime = new Intl.DateTimeFormat(undefined, {hour: '2-digit', minute: '2-digit', hour12: false,
                                                      timeZone: {{ location.tz.key|tojson }}});
 let current = {};   // what the selected record has, per image: {url, msg}
@@ -124,8 +125,10 @@ function showCam(c, stamp, status) {
   };
   if (!stamp || !status) return fail('No image for this record');
   if (status.startsWith('error')) return fail('Not captured');
-  const url = SRC_BASE + c.name + '/' + stamp;
-  current[c.name] = {url};
+  const orig = SRC_BASE + c.name + '/' + stamp;
+  const marks = c.name === MARKED ? 'markers=1&' : '';
+  const url = orig + (marks ? '?markers=1' : '');
+  current[c.name] = {url, orig};
   const next = new Image();
   next.onload = () => {
     if (frame.dataset.seq != seq) return;
@@ -138,7 +141,7 @@ function showCam(c, stamp, status) {
     fail(`No longer kept (${KEEP_DAYS} days)`);
     current[c.name] = {msg: `This image is no longer kept (camera images are kept ${KEEP_DAYS} days).`};
   };
-  next.src = url + '?w=640';
+  next.src = orig + '?' + marks + 'w=640';
 }
 
 function showCams(i, D) {
@@ -163,7 +166,7 @@ function zoomShow(name) {
   if (cur.url) {
     // Cameras: the original image; IR sky: the re-rendered grid.
     img.src = cur.url; img.hidden = false; msg.hidden = true;
-    full.href = cur.url; full.hidden = false;
+    full.href = cur.orig || cur.url; full.hidden = false;
   } else {
     img.hidden = true; img.removeAttribute('src');
     msg.textContent = cur.msg; msg.hidden = false; full.hidden = true;
