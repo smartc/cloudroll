@@ -45,7 +45,8 @@ const DataView = (() => {
     calibrating: '#ffeaa7', waiting: '#a29bfe', idle: '#636e72', disconnected: '#636e72',
   };
   const LANE_H = 14;
-  let OBS = [];   // [{key, label, kind, detail?}] from the page
+  let OBS = [];        // [{key, label, kind, detail?}] from the page
+  let OBS_ROWS = [];   // the same as [key, label, format] rows, kept apart from ROWS
 
   let D = null, cfg = null, hover = -1, sel = -1, gapMs = Infinity, fmtTime = null;
   const tips = {};
@@ -299,14 +300,19 @@ const DataView = (() => {
     const img = document.getElementById('rec-img'), noimg = document.getElementById('rec-noimg');
     img.hidden = !D.grid[i]; noimg.hidden = D.grid[i];
     if (D.grid[i]) img.src = `${cfg.recordBase}/${i}.png`;
-    const tbl = document.getElementById('rec-table');
-    tbl.replaceChildren(...ROWS.map(([k, label, f]) => {
-      const tr = document.createElement('tr');
-      const th = document.createElement('th'); th.textContent = label;
-      const td = document.createElement('td'); const v = D[k][i];
-      td.textContent = v === null || v === undefined ? '--' : f(v, i);
-      tr.append(th, td); return tr;
-    }));
+    const fill = (id, rows) => {
+      const tbl = document.getElementById(id);
+      if (!tbl) return;
+      tbl.replaceChildren(...rows.map(([k, label, f]) => {
+        const tr = document.createElement('tr');
+        const th = document.createElement('th'); th.textContent = label;
+        const td = document.createElement('td'); const v = (D[k] || [])[i];
+        td.textContent = v === null || v === undefined ? '--' : f(v, i);
+        tr.append(th, td); return tr;
+      }));
+    };
+    fill('rec-table', ROWS);
+    fill('rec-obs-table', OBS_ROWS);
     try { history.replaceState(null, '', '#' + i); } catch (e) { /* ignore */ }
     if (cfg.onSelect) cfg.onSelect(i, D);
   }
@@ -315,10 +321,22 @@ const DataView = (() => {
     const tbl = document.getElementById('all-table');
     if (tbl.rows.length && !force) return;
     tbl.replaceChildren();
-    const head = document.createElement('tr');
-    for (const h of ['Time', ...ROWS.map(r => r[1])]) {
-      const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
+    if (OBS_ROWS.length) {
+      // Group headings so the observatory columns read apart from the conditions.
+      const grp = document.createElement('tr'); grp.className = 'grp-head';
+      for (const [text, span, cls] of [['Conditions', ROWS.length + 1, ''], ['Observatory', OBS_ROWS.length, 'grp']]) {
+        const th = document.createElement('th'); th.textContent = text; th.colSpan = span;
+        if (cls) th.className = cls;
+        grp.appendChild(th);
+      }
+      tbl.appendChild(grp);
     }
+    const head = document.createElement('tr');
+    ['Time', ...ROWS.map(r => r[1]), ...OBS_ROWS.map(r => r[1])].forEach((h, c) => {
+      const th = document.createElement('th'); th.textContent = h;
+      if (OBS_ROWS.length && c === ROWS.length + 1) th.className = 'grp';
+      head.appendChild(th);
+    });
     tbl.appendChild(head);
     const frag = document.createDocumentFragment();
     D.t.forEach((tt, i) => {
@@ -331,6 +349,12 @@ const DataView = (() => {
         td.textContent = v === null || v === undefined ? '--' : f(v, i); td.className = 'num';
         tr.appendChild(td);
       }
+      OBS_ROWS.forEach(([k, , f], c) => {
+        const td = document.createElement('td'); const v = (D[k] || [])[i];
+        td.textContent = v === null || v === undefined ? '--' : f(v, i);
+        td.className = c ? 'num' : 'num grp';
+        tr.appendChild(td);
+      });
       frag.appendChild(tr);
     });
     tbl.appendChild(frag);
@@ -339,11 +363,9 @@ const DataView = (() => {
   async function init(options) {
     cfg = options;
     OBS = cfg.obs || [];
-    for (const row of OBS) {
-      ROWS.push([row.key, row.label, row.detail
-        ? (v, i) => { const d = (D[row.detail] || [])[i]; return d ? `${v} (${d})` : v; }
-        : v => v]);
-    }
+    OBS_ROWS = OBS.map(row => [row.key, row.label, row.detail
+      ? (v, i) => { const d = (D[row.detail] || [])[i]; return d ? `${v} (${d})` : v; }
+      : v => v]);
     fmtTime = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: cfg.tz });
     legend('leg-temp', CHARTS[0].series.map(s => [s.color, s.label]));
     legend('leg-rain', [[C.dry, 'Dry', true], [C.wet, 'Raining', true]]);

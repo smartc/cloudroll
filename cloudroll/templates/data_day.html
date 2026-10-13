@@ -65,7 +65,12 @@
       {% if cams %}<figcaption>IR sky</figcaption>{% endif %}
       <div class="rec-img"><img id="rec-img" class="zoomable" data-zoom="thermal" alt="Stored temperature grid" tabindex="0" role="button" aria-label="Enlarge IR sky image"><p id="rec-noimg" class="cam-empty-msg" hidden>No temperature grid stored for this record (captured before raw grids were recorded).</p></div>
     </figure>
+    {% if obs_rows %}<h3 class="rec-sub">Conditions</h3>{% endif %}
     <table id="rec-table"></table>
+    {% if obs_rows %}
+    <h3 class="rec-sub">Observatory</h3>
+    <table id="rec-obs-table"></table>
+    {% endif %}
     <p class="muted">Click any chart to pick a record; ← / → step through them. Click an image to enlarge it. The IR image is re-rendered from the stored 32×24 grid using the colour scale in effect at capture.{% if cams %} Camera images are kept {{ frames_days }} days.{% endif %}</p>
   </div>
 </div>

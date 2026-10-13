@@ -89,7 +89,12 @@ code { font-size: 0.85em; color: #b2bec3; }
 .rec-img img { width: 100%; height: auto; border-radius: 6px; display: block; }
 .rec-img p { margin: 8px 0; }
 #rec-table { margin-top: 10px; }
-#rec-table th { width: 45%; }
+#rec-table th, #rec-obs-table th { width: 45%; }
+.rec-sub { font-size: 0.85em; color: #74b9ff; text-transform: uppercase; letter-spacing: 1px; margin: 14px 0 6px; }
+.rec-sub + #rec-table { margin-top: 0; }
+.data-table .grp { border-left: 2px solid #4a90d9; }
+.data-table tr.grp-head th { text-align: center; color: #74b9ff; text-transform: uppercase;
+                              font-size: 0.8em; letter-spacing: 1px; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: #1a4a8a; }
 details summary { cursor: pointer; color: #a0c4ff; font-weight: bold; }
