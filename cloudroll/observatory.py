@@ -287,6 +287,10 @@ class Observatory:
         w = max(2, round(im.width / 600))
         font = _marker_font(max(12, round(im.width / 70)))
         to_px = self._pixel_mapper(im, crop)
+        ring = math.radians(RING_DEG)
+        # Centres of all markers first, so overlapping ones can be spread out.
+        centres = [to_px(st.alt, st.az) if st.marker else None for st in state.rigs]
+        placed = []
         for i, (rig, st) in enumerate(zip(self.rigs, state.rigs)):
             if not st.marker:
                 continue
@@ -303,20 +307,35 @@ class Observatory:
                 return out
 
             cx, cy = to_px(st.alt, st.az)
-            ring = math.radians(RING_DEG)
             ring_px = math.dist((cx, cy), pts([(0, ring)])[0])
+            # k-th marker overlapping earlier ones (e.g. both rigs on Polaris for
+            # focus): a slightly larger ring, ticks turned 45° and the label in
+            # the next quadrant, so every rig stays visible.
+            near = lambda c: c is not None and math.dist((cx, cy), c) < 4 * ring_px  # noqa: E731
+            k = sum(near(c) for c in placed) % 4
+            n = sum(near(c) for c in centres)       # markers in this cluster, incl. this one
+            placed.append((cx, cy))
+            grow = 1 + 0.35 * k
+            # Alone: label just off the ring.  In a cluster: past every marker's ticks.
+            label_off = ring_px * (1.6 if n < 2 else 2.3 * (1 + 0.35 * (min(n, 4) - 1)) * 0.75)
             if style in ("ring", "both"):
-                circle = [(ring * math.sin(t), ring * math.cos(t))
-                          for t in (k * math.pi / 24 for k in range(49))]
+                r = ring * grow
+                circle = [(r * math.sin(t), r * math.cos(t))
+                          for t in (j * math.pi / 24 for j in range(49))]
                 d.line(pts(circle), fill=col, width=w, joint="curve")
             if style in ("fov", "both"):
                 d.line(pts(fov_outline(rig, st.pa)), fill=col, width=w, joint="curve")
             # Ticks outside the ring, so even a tiny FOV is easy to find.
-            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                d.line([cx + dx * ring_px * 1.3, cy + dy * ring_px * 1.3,
-                        cx + dx * ring_px * 2.2, cy + dy * ring_px * 2.2], fill=col, width=w)
-            d.text((cx + ring_px * 1.6, cy - ring_px * 1.6), st.label, fill=col, font=font,
-                   anchor="ld", stroke_width=max(2, w), stroke_fill=(0, 0, 0))
+            rp = ring_px * grow
+            for j in range(4):
+                t = math.pi / 2 * j + (math.pi / 4 if k % 2 else 0)
+                dx, dy = math.cos(t), math.sin(t)
+                d.line([cx + dx * rp * 1.3, cy + dy * rp * 1.3,
+                        cx + dx * rp * 2.2, cy + dy * rp * 2.2], fill=col, width=w)
+            # Label quadrant: upper right, upper left, lower right, lower left.
+            sx, sy, anchor = [(1, -1, "ld"), (-1, -1, "rd"), (1, 1, "la"), (-1, 1, "ra")][k]
+            d.text((cx + sx * label_off, cy + sy * label_off), st.label, fill=col, font=font,
+                   anchor=anchor, stroke_width=max(2, w), stroke_fill=(0, 0, 0))
         return im
 
     def _pixel_mapper(self, im, crop):
