@@ -151,8 +151,8 @@ your network, restrict `/api/` in the Apache vhost.
 With an `observatory` block, every capture also reads the roll-off roof, each
 telescope's park sensor and its mount position, and:
 
-* adds a status line to the allsky panel's caption (`ROOF OPEN · KEPLER TRACKING ·
-  MAGELLAN PARKED`) and to the Live page;
+* adds a status line to the allsky panel's caption (`ROOF OPEN · PIER 1 UNPARKED · RIG 1 CAPTURING ·
+  PIER 2 PARKED · RIG 2 PARKED`) and to the Live page;
 * draws a marker on the allsky image where each active telescope points (a 2° ring,
   the camera's field of view, or both – see Runtime settings);
 * stores the roof state and each rig's status, RA/Dec, alt/az and rotator angle in the
@@ -195,7 +195,7 @@ Each pier (park sensor) and rig (NINA) has its own status:
 | `parked` / `idle` / `disconnected` | no sequence running; mount parked, unparked but not tracking, or not connected |
 
 The Live page adds the running sequence item and the guider state, e.g.
-`Kepler: capturing (Take Exposure · guiding)`. Status is sampled once per capture.
+`Rig 1: capturing (Take Exposure · guiding)`. Status is sampled once per capture.
 
 The Data page shows an **Observatory** strip (one lane each for the roof, every pier
 and every rig, coloured by state) and the same states in the record inspector and the
