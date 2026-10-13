@@ -27,6 +27,9 @@
 
 <div class="data-layout">
   <div class="charts">
+    {% if obs_rows %}
+    <div class="card"><h2>Observatory</h2><div class="legend" id="leg-obs"></div><div class="chart" id="c-obs" data-h="{{ 32 + 14 * obs_rows|length }}"></div></div>
+    {% endif %}
     <div class="card"><h2>Temperature (°C)</h2><div class="legend" id="leg-temp"></div><div class="chart" id="c-temp" data-h="220"></div></div>
     <div class="card"><h2>Cloud Cover (%)</h2><div class="chart" id="c-cloud" data-h="150"></div></div>
     <div class="card"><h2>Sky Brightness (lux, log scale)</h2><div class="chart" id="c-lux" data-h="150"></div></div>
@@ -34,9 +37,6 @@
     <div class="card"><h2>Pressure (hPa)</h2><div class="chart" id="c-pres" data-h="150"></div></div>
     <div class="card"><h2>Humidity (%)</h2><div class="chart" id="c-hum" data-h="150"></div></div>
     <div class="card"><h2>Rain</h2><div class="legend" id="leg-rain"></div><div class="chart" id="c-rain" data-h="56"></div></div>
-    {% if obs_rows %}
-    <div class="card"><h2>Observatory</h2><div class="legend" id="leg-obs"></div><div class="chart" id="c-obs" data-h="{{ 32 + 14 * obs_rows|length }}"></div></div>
-    {% endif %}
   </div>
 
   <div class="card record" id="record">
