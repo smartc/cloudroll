@@ -292,6 +292,15 @@ The card reads `/api/info` (days, cameras, time zone) and the same
   matching stars to a catalogue (currently a separate script).
 * **Telescope markers on the Home Assistant card** – draw them from the records'
   `observatory` field over the original allsky images.
+* **Web setup page** – configure the observatory from the browser instead of
+  config.json: NINA instances, piers / park sensors and the roof, with a read-only
+  "test connection" for each.
+* **Any number of rigs in the setup** – add and remove rigs freely (the config already
+  takes a list; markers cycle 4 default colours and spread up to 4 overlapping labels).
+* **Interlock warning** – highlight the roof moving while any pier reads unparked,
+  which the roof interlock should never allow.
+* **Park sensor dropouts** – hold a pier's last state for a capture or two before
+  showing it offline, so a sensor reboot doesn't hide a marker.
 
 ## License
 
