@@ -220,7 +220,8 @@ roof is `unknown` and no markers are drawn.
 
 ```json
 "observatory": {
-  "roof": {"url": "http://roof.example.com:11111/api/v1/dome/0", "link": "http://roof.example.com/"},
+  "roof": {"url": "http://roof.example.com:11111/api/v1/dome/0", "link": "http://roof.example.com/",
+           "status_url": "http://roof.example.com/api/status"},
   "allsky_source": "allsky",
   "rigs": [
     {
@@ -244,7 +245,8 @@ roof is `unknown` and no markers are drawn.
 
 | Key | Meaning |
 |-----|---------|
-| `roof.url` | Alpaca Dome device base URL |
+| `roof.url` | Alpaca Dome device base URL (read when there's no `status_url`) |
+| `roof.status_url` | Optional: read the roof from the controller's own JSON status page instead of Alpaca, with GET only (`status` of Open / Closed / Opening / Closing / Error), e.g. `http://roof.example.com/api/status`. Some controllers answer Alpaca "Not connected" until a client such as NINA connects the dome; a status page needs no connection. When set, `roof.url` isn't read |
 | `roof.link`, `roof.label` | Optional: a "Label ↗" button in the page header for the roof controller's own web page (label defaults to "Roof") |
 | `allsky_source` | Name of the source the markers are drawn on |
 | `rigs[].nina` | NINA Advanced API base (`http://host:1888/v2/api`); the plugin must be enabled and port 1888 reachable |

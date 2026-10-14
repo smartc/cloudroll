@@ -1,7 +1,8 @@
 """Observatory status and telescope markers on the allsky image.
 
 Each capture reads, in parallel:
-  roof          ASCOM Alpaca Dome  .../dome/N/shutterstatus
+  roof          the controller's own /api/status (roof.status_url) if set,
+                otherwise ASCOM Alpaca Dome .../dome/N/shutterstatus
   park sensors  ASCOM Alpaca Switch .../switch/N/getswitch (one per rig)
   rigs          NINA Advanced API   /equipment/{mount,rotator,camera,guider,focuser}/info,
                                     /sequence/json
@@ -38,7 +39,11 @@ ALLOWED = {
              "equipment/guider/info", "equipment/focuser/info", "sequence/json", "version"),
     "switch": ("getswitch",),
     "dome": ("shutterstatus",),
+    "roof_web": ("api/status",),      # roof controller web UI status JSON (reads only)
 }
+# The roof controller's web status strings.
+ROOF_WEB = {"open": "open", "closed": "closed", "opening": "opening", "closing": "closing",
+            "error": "error"}
 
 SHUTTER = {0: "open", 1: "closed", 2: "opening", 3: "closing", 4: "error"}
 # Rig states drawn in the rig's colour (the rest are muted).
@@ -165,10 +170,16 @@ class Observatory:
         return st
 
     def _roof(self):
+        """Roof state from the controller's web status if configured (it needs no
+        Alpaca connection), otherwise from Alpaca shutterstatus."""
         roof = self.cfg.get("roof")
         if not roof:
             return "unknown"
         try:
+            if roof.get("status_url"):
+                j = self.client.get("roof_web", roof["status_url"].removesuffix("/api/status"),
+                                    "api/status")
+                return ROOF_WEB.get(str(j.get("status", "")).lower(), "unknown")
             v = self.client.alpaca("dome", roof["url"], "shutterstatus")
             return SHUTTER.get(int(v), "error")
         except Exception as e:  # noqa: BLE001 – unreachable roof controller = unknown
