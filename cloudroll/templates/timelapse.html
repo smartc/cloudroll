@@ -1,8 +1,16 @@
 {% extends "base.html" %}
 {% block title %}{{ meta.date }} · {{ title }}{% endblock %}
 {% block content %}
+{% set first = tabs[0].run if meta.run and tabs[0].run else tabs[0] %}
 <div class="card">
   <h2>{{ meta.date|nicedate }}{% if not meta.complete %} <span class="badge">partial</span>{% endif %}</h2>
+  {% if meta.run %}
+  <div class="layout-switch" role="group" aria-label="Span">
+    <span class="muted">Show:</span>
+    <button type="button" class="tbtn act" data-span="run" title="Roof open {{ meta.run.roof_open|hm }} → {{ meta.run.roof_close|hm if meta.run.roof_close else 'sunrise' }}">Imaging run</button>
+    <button type="button" class="tbtn" data-span="day">Full day</button>
+  </div>
+  {% endif %}
   {% if tabs|length > 1 %}
   <div class="layout-switch" role="group" aria-label="Video">
     <span class="muted">Large image:</span>
@@ -11,8 +19,8 @@
   {% endif %}
   <div class="live-wrap">
     <video class="live" controls loop playsinline preload="metadata"
-           poster="{{ url_for('media_timelapse', name=tabs[0].jpg) }}"
-           src="{{ url_for('media_timelapse', name=tabs[0].mp4) }}"></video>
+           poster="{{ url_for('media_timelapse', name=first.jpg) }}"
+           src="{{ url_for('media_timelapse', name=first.mp4) }}"></video>
   </div>
   <div class="speed">
     Speed:
@@ -23,13 +31,17 @@
 </div>
 <div class="card">
   <table>
+    {% if meta.run %}
+    <tr><th>Imaging run</th><td>Roof open {{ meta.run.roof_open|hm }} → {% if meta.run.roof_close %}closed {{ meta.run.roof_close|hm }}{% else %}sunrise (roof never read closed){% endif %}
+      · {{ meta.run.frames }} frames ({{ meta.run.first_frame|hm }} – {{ meta.run.last_frame|hm }}) · {{ meta.run.duration_sec }} s</td></tr>
+    {% endif %}
     <tr><th>Window</th><td>{{ meta.window_start|hm }} → {{ meta.window_end|hm }} (next day)</td></tr>
     <tr><th>Frames</th><td>{{ meta.frames }} ({{ meta.first_frame|hm }} – {{ meta.last_frame|hm }})</td></tr>
     <tr><th>Length</th><td>{{ meta.duration_sec }} s at {{ meta.fps }} fps</td></tr>
-    <tr><th>Size</th><td id="tl-size">{{ '%.1f'|format(tabs[0].size_bytes / 1e6) }} MB</td></tr>
+    <tr><th>Size</th><td id="tl-size">{{ '%.1f'|format(first.size_bytes / 1e6) }} MB</td></tr>
   </table>
   <p>
-    <a class="tbtn" id="tl-download" href="{{ url_for('media_timelapse', name=tabs[0].mp4) }}" download>Download MP4</a>
+    <a class="tbtn" id="tl-download" href="{{ url_for('media_timelapse', name=first.mp4) }}" download>Download MP4</a>
     {% if has_frames %}<a class="tbtn" href="{{ url_for('day_view', day=meta.date) }}">Browse frames</a>{% endif %}
     {% for l in missing %}
     <button class="tbtn" onclick="buildLayout('{{ l.name }}', this)">Build {{ l.label }} version</button>
@@ -53,10 +65,17 @@ function setSpeed(s, btn) {
   btn.classList.add('act');
 }
 
-document.querySelectorAll('[data-video]').forEach(btn => btn.addEventListener('click', () => {
-  const v = VIDEOS[+btn.dataset.video];
-  // Carry the position and speed over so both views can be compared.
-  const t = video.currentTime, rate = video.playbackRate, playing = !video.paused;
+// The video shown is one layout (tab) over one span: the imaging run or the full day.
+let cur = 0, span = {{ ('run' if meta.run and tabs[0].run else 'day')|tojson }};
+
+function show() {
+  const tab = VIDEOS[cur];
+  const v = span === 'run' && tab.run ? tab.run : tab;
+  // Carry the position and speed over when only the layout changes, so the
+  // views can be compared; a span change starts from the top.
+  const sameSpan = video.dataset.span === span;
+  const t = sameSpan ? video.currentTime : 0, rate = video.playbackRate, playing = !video.paused;
+  video.dataset.span = span;
   video.poster = TL_BASE + v.jpg;
   video.src = TL_BASE + v.mp4;
   video.addEventListener('loadedmetadata', () => {
@@ -66,7 +85,22 @@ document.querySelectorAll('[data-video]').forEach(btn => btn.addEventListener('c
   }, {once: true});
   document.getElementById('tl-download').href = TL_BASE + v.mp4;
   document.getElementById('tl-size').textContent = (v.size_bytes / 1e6).toFixed(1) + ' MB';
-  document.querySelectorAll('[data-video]').forEach(b => b.classList.toggle('act', b === btn));
+  document.querySelectorAll('[data-video]').forEach(b => b.classList.toggle('act', +b.dataset.video === cur));
+  document.querySelectorAll('[data-span]').forEach(b => {
+    b.classList.toggle('act', b.dataset.span === span);
+    // A layout built before the run was known has no run clip.
+    if (b.dataset.span === 'run') b.disabled = !tab.run;
+  });
+}
+video.dataset.span = span;
+document.querySelectorAll('[data-video]').forEach(btn => btn.addEventListener('click', () => {
+  cur = +btn.dataset.video;
+  if (!VIDEOS[cur].run) span = 'day';
+  show();
+}));
+document.querySelectorAll('[data-span]').forEach(btn => btn.addEventListener('click', () => {
+  span = btn.dataset.span;
+  show();
 }));
 
 async function buildLayout(layout, btn) {

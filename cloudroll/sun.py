@@ -10,7 +10,7 @@ from astral import Observer
 from astral.sun import sunrise
 
 
-def _sunrise(loc, d):
+def sunrise_on(loc, d):
     try:
         return sunrise(Observer(loc.latitude, loc.longitude), date=d, tzinfo=loc.tz)
     except ValueError:
@@ -20,7 +20,7 @@ def _sunrise(loc, d):
 
 def window_bounds(loc, d, offset_min):
     off = timedelta(minutes=offset_min)
-    return _sunrise(loc, d) + off, _sunrise(loc, d + timedelta(days=1)) + off
+    return sunrise_on(loc, d) + off, sunrise_on(loc, d + timedelta(days=1)) + off
 
 
 def window_date_for(loc, when, offset_min):

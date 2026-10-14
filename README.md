@@ -12,6 +12,14 @@ through Home Assistant, a URL or RTSP – can be added to every frame. See
 A day's window runs from **sunrise + 1 h** to **sunrise + 1 h on the following day**,
 labelled by the date it starts on.
 
+On a night with an **imaging run**, the run is also kept as its own video. The run lasts from
+the roof first opening until it last reads closed. A brief close in between, such as a safety
+event, stays inside the run. If the roof never reads closed, the run ends at sunrise, or
+earlier if the roof controller goes offline. The day video is encoded with keyframes on the
+run's first and last frames, so the run is cut by stream copy in about a second, with no
+second encode. It's the default view on the timelapse page and the gallery poster, with
+**Full day** one click away.
+
 Once a window closes (checked every 10 min), the day is finalised: its frames are encoded
 into one MP4 (~16 s of CPU on this board for classic frames, about a minute per layout
 with image sources) and its readings file is gzipped. Frame JPEGs, and the original source
@@ -30,6 +38,7 @@ data/sources/<date>/<source>/*.jpg    each source's original image as fetched
 data/readings/<date>.jsonl[.gz]       one record per capture: readings, colour scale, raw 32×24 °C matrix
 data/timelapses/<date>.mp4/.jpg/.json main video, poster, metadata
 data/timelapses/<date>.<layout>.mp4   further layouts of the same day, with their posters
+data/timelapses/<date>[.<layout>].run.mp4/.jpg  the night's imaging run, cut from that day video
 data/settings.json                    runtime settings changed from the web UI
 ```
 
@@ -93,6 +102,7 @@ Copied from `config.example.json`; it holds your site's details and is not track
 | `color_scale.hot_marker` | Show magenta for pixels above the scale (fixed/floating modes) |
 | `timelapse.fps` / `crf` | Playback rate and x264 quality |
 | `timelapse.offset_after_sunrise_min` | Window start offset after sunrise (default 60) |
+| `timelapse.run.enabled` / `pad_min` | Also cut the night's imaging run out of each day video (default on, padded 5 min each side); needs a roof in `observatory` |
 | `retention.frames_days` | Keep frames and source images for N days, whether or not the timelapse was built |
 | `retention.readings_days` | Delete readings files older than N days (0 = keep forever) |
 | `retention.timelapses_days` | Delete timelapses older than N days (0 = keep forever) |

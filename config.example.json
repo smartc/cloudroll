@@ -27,7 +27,8 @@
   "timelapse": {
     "fps": 24,
     "crf": 23,
-    "offset_after_sunrise_min": 60
+    "offset_after_sunrise_min": 60,
+    "run": {"enabled": true, "pad_min": 5}
   },
   "retention": {
     "frames_days": 7,

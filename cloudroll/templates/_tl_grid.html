@@ -2,9 +2,12 @@
 <div class="tl-grid">
   {% for t in timelapses %}
   <a class="tl-card" href="{{ url_for('timelapse', day=t.date) }}">
-    <img src="{{ url_for('media_timelapse', name=t.date ~ '.jpg') }}" loading="lazy" alt="{{ t.date }}">
+    <img src="{{ url_for('media_timelapse', name=(t.date ~ '.run.jpg') if t.run else (t.date ~ '.jpg')) }}" loading="lazy" alt="{{ t.date }}">
     <div class="tl-info">
       <div class="tl-date">{{ t.date|nicedate }}{% if not t.complete %} <span class="badge">partial</span>{% endif %}</div>
+      {% if t.run %}
+      <div class="muted">Imaging run {{ t.run.roof_open|hm }} → {{ t.run.roof_close|hm if t.run.roof_close else 'sunrise' }} · {{ t.run.duration_sec }} s</div>
+      {% endif %}
       <div class="muted">{{ t.window_start|hm }} → {{ t.window_end|hm }} · {{ t.frames }} frames · {{ t.duration_sec }} s</div>
     </div>
   </a>

@@ -41,7 +41,9 @@ DEFAULTS = {
         "overcast_delta": 5.0,
         "hot_marker": True,
     },
-    "timelapse": {"fps": 24, "crf": 23, "offset_after_sunrise_min": 60},
+    # run: also cut the night's imaging run (roof open → closed) out of the day video.
+    "timelapse": {"fps": 24, "crf": 23, "offset_after_sunrise_min": 60,
+                  "run": {"enabled": True, "pad_min": 5}},
     "retention": {"frames_days": 7, "readings_days": 0, "timelapses_days": 0},
     # cors_origins: other sites (e.g. a Home Assistant dashboard card) allowed to
     # read the /api/ JSON from a browser.
