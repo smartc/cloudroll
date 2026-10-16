@@ -30,7 +30,7 @@ need re-checking as winter brings colder nights. Firmware ideas are filed as
 |-------|----------|
 | `allsky` | the configured `allsky_stats` entities from Home Assistant, plus `age_sec` (time since each value last *changed*) and `image_age_sec` (age of the allsky image, from the `image_time` entity) |
 | `astro` | `sun_alt`, `moon_alt` (degrees) and `moon_illum` (%), computed locally |
-| `sensor_cloud` | the sensor's cloud settings: method, region, edge exclude, Clear Δ, Overcast Δ (read from its `/setup` page along with the colour scale, at most every 10 min) |
+| `sensor_cloud` | the sensor's cloud settings: method, region, edge exclude, Clear Δ, Overcast Δ, and with firmware from 2026-10-16 the ambient compensation (`amb_slope`, `amb_ref`, `dew_slope`, `dew_ref`, `amb_tau_sec`). Read from its `/setup` page along with the colour scale, at most every 10 min |
 
 A star count is only trusted while its allsky image is less than `allsky_stats.max_age_sec`
 old. HA re-stamps an entity only when its value changes, so a count stuck at 0 under thick

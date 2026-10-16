@@ -70,7 +70,7 @@
 
   function flatten(nights) {
     const moonDown = $('f-moon').checked;
-    const keys = ['t', 'ambient', 'dew', 'd_med', 'dq', 'cloud', 'clear_delta', 'overcast_delta', 'stars', 'moon_alt', 'moon_illum'];
+    const keys = ['t', 'ambient', 'dew', 'd_med', 'dq', 'cloud', 'clear_delta', 'overcast_delta', 'amb_slope', 'amb_ref', 'stars', 'moon_alt', 'moon_illum'];
     M = Object.fromEntries(keys.map(k => [k, []]));
     M.night = []; M.band = [];
     for (const d of [...nights].reverse()) {   // oldest first: the last minute is the newest
@@ -79,7 +79,7 @@
       for (let i = 0; i < s.t.length; i++) {
         if (s.dq[i] === null || s.d_med[i] === null) continue;
         if (moonDown && s.moon_alt[i] > 0 && s.moon_illum[i] > 10) continue;
-        for (const k of keys) M[k].push(s[k][i]);
+        for (const k of keys) M[k].push(s[k] ? s[k][i] : (k === 'amb_slope' || k === 'amb_ref' ? 0 : null));
         M.night.push(d);
         M.band.push(bandOf(s.stars[i]));
       }
@@ -128,7 +128,8 @@
     $('t-minutes').textContent = n;
     $('t-clear').textContent = clearIdx.length;
     $('t-over').textContent = overIdx.length;
-    if (n) $('t-thr').textContent = `${M.clear_delta[n - 1] ?? '--'} / ${M.overcast_delta[n - 1] ?? '--'}`;
+    if (n) $('t-thr').textContent = `${M.clear_delta[n - 1] ?? '--'} / ${M.overcast_delta[n - 1] ?? '--'}` +
+                                    (M.amb_slope[n - 1] ? ` + ${M.amb_slope[n - 1]}×T` : '');
     const falseRep = clearIdx.filter(i => M.cloud[i] >= cloudyAt).length;
     $('t-false').textContent = clearIdx.length ? (100 * falseRep / clearIdx.length).toFixed(1) + ' %' : '--';
     whatIf(clearIdx, overIdx, cloudyAt);
@@ -172,7 +173,8 @@
     const n = M.t.length;
     $('w-clear').value = CAL.current?.clear ?? (n ? M.clear_delta[n - 1] : null) ?? 26;
     $('w-over').value = CAL.current?.overcast ?? (n ? M.overcast_delta[n - 1] : null) ?? 16;
-    $('w-slope').value = 0; $('w-ref').value = 0;
+    $('w-slope').value = CAL.current?.slope ?? (n ? M.amb_slope[n - 1] : 0) ?? 0;
+    $('w-ref').value = CAL.current?.ref ?? (n ? M.amb_ref[n - 1] : 0) ?? 0;
   }
 
   function useRecalc() {
@@ -257,6 +259,7 @@
     for (let i = 0; i < X.length; i++) if (ok(i)) { x0 = Math.min(x0, X[i]); x1 = Math.max(x1, X[i]); y0 = Math.min(y0, Y[i]); y1 = Math.max(y1, Y[i]); }
     const wp = wi(), wc = wp.c, wo = wp.o;
     const n = M.t.length, sc = n ? M.clear_delta[n - 1] : null, so = n ? M.overcast_delta[n - 1] : null;
+    const sk = n ? M.amb_slope[n - 1] || 0 : 0, sref = n ? M.amb_ref[n - 1] || 0 : 0;
     if (!isFinite(x0)) {
       ctx.fillStyle = C.axis; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('No minutes with star counts in this range', W / 2, H / 2); geom = null; return;
@@ -291,22 +294,24 @@
       ctx.fillStyle = C.text; ctx.font = '10px sans-serif'; ctx.textAlign = right ? 'right' : 'left';
       ctx.fillText(text, right ? P.l + cw - 4 : P.l + 4, py(v) + (below ? 12 : -4));
     };
-    hline(sc, C.line, [], `Sensor Clear Δ ${sc}`, false, false);
-    hline(so, C.line, [], `Sensor Overcast Δ ${so}`, false, true);
-    if (!wp.k) {
-      if (wc !== sc) hline(wc, C.whatif, [5, 4], `What-if Clear ${wc}`, true, false);
-      if (wo !== so) hline(wo, C.whatif, [5, 4], `What-if Overcast ${wo}`, true, true);
-    } else if (xKey === 'ambient') {
-      // Ambient-compensated: the thresholds are sloped lines on this axis.
-      const sline = (v, text, below) => {
-        const ya = v + wp.k * (x0 - wp.ref), yb = v + wp.k * (x1 - wp.ref);
-        ctx.strokeStyle = C.whatif; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
-        ctx.beginPath(); ctx.moveTo(px(x0), py(ya)); ctx.lineTo(px(x1), py(yb)); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = C.text; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
-        ctx.fillText(text, P.l + cw - 4, py(yb) + (below ? 12 : -4));
-      };
-      sline(wc, `What-if Clear ${wc} + ${wp.k}×(T−${wp.ref})`, false);
-      sline(wo, `What-if Overcast ${wo} + ${wp.k}×(T−${wp.ref})`, true);
+    // Ambient-compensated thresholds are sloped lines on the ambient axis;
+    // on the dew-point axis they can't be drawn, so they're left out.
+    const sline = (v, k, ref, color, dash, text, right, below) => {
+      if (v === null || !isFinite(v)) return;
+      if (!k) return hline(v, color, dash, text, right, below);
+      if (xKey !== 'ambient') return;
+      const ya = v + k * (x0 - ref), yb = v + k * (x1 - ref);
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash(dash);
+      ctx.beginPath(); ctx.moveTo(px(x0), py(ya)); ctx.lineTo(px(x1), py(yb)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = C.text; ctx.font = '10px sans-serif'; ctx.textAlign = right ? 'right' : 'left';
+      ctx.fillText(text, right ? P.l + cw - 4 : P.l + 4, py(right ? yb : ya) + (below ? 12 : -4));
+    };
+    const tag = (k, ref) => k ? ` + ${k}×(T−${ref})` : '';
+    sline(sc, sk, sref, C.line, [], `Sensor Clear Δ ${sc}${tag(sk, sref)}`, false, false);
+    sline(so, sk, sref, C.line, [], `Sensor Overcast Δ ${so}${tag(sk, sref)}`, false, true);
+    if (wc !== sc || wo !== so || wp.k !== sk || wp.ref !== sref) {
+      sline(wc, wp.k, wp.ref, C.whatif, [5, 4], `What-if Clear ${wc}${tag(wp.k, wp.ref)}`, true, false);
+      sline(wo, wp.k, wp.ref, C.whatif, [5, 4], `What-if Overcast ${wo}${tag(wp.k, wp.ref)}`, true, true);
     }
     // clear-sky fit line
     const f = fitClear();

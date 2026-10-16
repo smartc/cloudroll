@@ -462,7 +462,8 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
                                clear_stars=calibration.clear_stars,
                                labels_list=list(LABELS),
                                allsky=calibration.allsky_source, recalc=recalc,
-                               scale=worker.color_scale() if worker else None)
+                               scale=worker.color_scale() if worker else None,
+                               sensor_cloud=sensor.cloud_config())
 
     @app.route("/api/calibration/nights.json")
     def api_calibration_nights():

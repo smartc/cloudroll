@@ -126,6 +126,15 @@ class SensorClient:
             "clear_delta": num("cloudClear"),
             "overcast_delta": num("cloudOvercast"),
         }
+        # Ambient compensation (firmware with SkyConditions_90640#9): both
+        # thresholds shift by amb_slope × (ambient − amb_ref) [+ dew term].
+        # Absent on older firmware, which behaves as slope 0.
+        for key, field in (("amb_slope", "cldAmbSlope"), ("amb_ref", "cldAmbRef"),
+                           ("dew_slope", "cldDewSlope"), ("dew_ref", "cldDewRef"),
+                           ("amb_tau_sec", "cldAmbTau")):
+            v = num(field)
+            if v is not None:
+                self._cloud_cache[key] = v
 
         mode_m = re.search(r"name='heatMode'.*?<option value='(\d)' selected", html, re.S)
         scale = {

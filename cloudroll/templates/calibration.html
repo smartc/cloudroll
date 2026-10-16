@@ -115,7 +115,9 @@ const CAL = {
   mediaBase: {{ url_for('media_calibration_image', day='0000-00-00', stamp='x')[:-16]|tojson }},
   nightsUrl: {{ url_for('api_calibration_nights')|tojson }},
   downloadBase: {{ url_for('media_calibration_night', day='0000-00-00')[:-19]|tojson }},
-  current: {{ ({'clear': scale.clear_delta, 'overcast': scale.overcast_delta} if scale else None)|tojson }},
+  current: {{ ({'clear': sensor_cloud.clear_delta, 'overcast': sensor_cloud.overcast_delta,
+                'slope': sensor_cloud.amb_slope or 0, 'ref': sensor_cloud.amb_ref or 0} if sensor_cloud
+               else ({'clear': scale.clear_delta, 'overcast': scale.overcast_delta} if scale else None))|tojson }},
   recalc: {{ recalc|tojson }},
 };
 </script>

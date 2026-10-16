@@ -347,7 +347,7 @@ class Calibration:
     # -- summaries for the review page -------------------------------------------
     def _write_summary(self, day, header, minutes):
         cols = {k: [] for k in ("t", "ambient", "humidity", "dew", "sky_center", "d_med",
-                                "dq", "cloud", "clear_delta", "overcast_delta", "stars",
+                                "dq", "cloud", "clear_delta", "overcast_delta", "amb_slope", "amb_ref", "stars",
                                 "moon_alt", "moon_illum", "sun_alt", "edge")}
         for m in minutes:
             px = m.get("pixels")
@@ -377,6 +377,8 @@ class Calibration:
             cols["cloud"].append(r.get("cloud_cover"))
             cols["clear_delta"].append(sc.get("clear_delta", scale.get("clear_delta")))
             cols["overcast_delta"].append(sc.get("overcast_delta", scale.get("overcast_delta")))
+            cols["amb_slope"].append(sc.get("amb_slope", 0.0))
+            cols["amb_ref"].append(sc.get("amb_ref", 0.0))
             cols["stars"].append(self.stars(m))
             cols["moon_alt"].append(m["astro"]["moon_alt"])
             cols["moon_illum"].append(m["astro"]["moon_illum"])
