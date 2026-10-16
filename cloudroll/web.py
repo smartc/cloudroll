@@ -14,8 +14,10 @@ from PIL import Image
 
 from . import __version__
 from .render import thermal_with_scale
+from .calibration import LABELS
+from .skystats import fresh_value
 from .store import SCALAR_FIELDS, stamp_to_datetime
-from .sun import window_bounds, window_date_for
+from .sun import night_events, window_bounds, window_date_for
 
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -25,6 +27,7 @@ SOURCE_WIDTHS = (320, 480, 640, 800, 960, 1280)
 TL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(\.[a-z0-9_-]+)?\.(mp4|jpg)$")
 GRID_ROWS, GRID_COLS = 24, 32
 READINGS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl(\.gz)?$")
+STAMP_RE = re.compile(r"^\d{8}T\d{6}Z$")
 
 
 def _blank(v):
@@ -46,9 +49,14 @@ def month_nav(dates, requested):
     return {"month": month, "months": months, "counts": counts, "newer": newer, "older": older}
 
 
-def create_app(cfg, loc, store, worker, sensor, settings):
+def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
     app = Flask(__name__)
     offset = cfg["timelapse"]["offset_after_sunrise_min"]
+    # Allsky statistics recorded with each capture (config "allsky_stats").
+    allsky_keys = [k for k in (cfg.get("allsky_stats") or {}).get("entities") or {}]
+    allsky_max_age = (cfg.get("allsky_stats") or {}).get("max_age_sec", 300)
+    has_stars = "stars" in allsky_keys
+    ASTRO_KEYS = ["sun_alt", "moon_alt", "moon_illum"]
     labels = {s["name"]: s.get("label") or s["name"].title() for s in cfg["sources"]}
     layouts = [{"name": n, "label": labels[n]} for n in cfg["layouts"]]
     rigs = cfg["observatory"]["rigs"]
@@ -94,6 +102,13 @@ def create_app(cfg, loc, store, worker, sensor, settings):
     def local_time(name):
         return stamp_to_datetime(name).astimezone(loc.tz)
 
+    def night_info(day):
+        """The night inside window `day` as ISO strings and epoch ms (None when
+        the event doesn't happen, e.g. no astronomical darkness in June)."""
+        ev = night_events(loc, datetime.fromisoformat(day).date())
+        return {k: ({"iso": v.isoformat(), "ms": v.timestamp() * 1000, "hm": v.strftime("%H:%M")}
+                    if v else None) for k, v in ev.items()}
+
     def static_url(filename):
         """Static file URL with its modification time, so browsers never run
         a stale script or stylesheet after an update."""
@@ -119,7 +134,7 @@ def create_app(cfg, loc, store, worker, sensor, settings):
     @app.context_processor
     def globals_():
         return {"title": cfg["web"]["title"], "location": loc, "version": __version__,
-                "static_url": static_url,
+                "static_url": static_url, "has_calibration": calibration is not None,
                 "sensor_url": sensor.web_url(), "layouts": layouts,
                 "source_links": [{"label": s.get("label") or s["name"].title(), "url": s["link"]}
                                  for s in cfg["sources"] if s.get("link")] + roof_link,
@@ -150,6 +165,8 @@ def create_app(cfg, loc, store, worker, sensor, settings):
         current = window_date_for(loc, datetime.now(loc.tz), offset)
         start, end = window_bounds(loc, current, offset)
         return render_template("index.html", latest=store.latest_meta(), recent=recent,
+                               night=night_info(current.isoformat()), has_stars=has_stars,
+                               allsky_max_age=allsky_max_age,
                                timelapses=store.timelapse_list()[:4], worker=worker,
                                window_start=start, window_end=end, offset=offset,
                                interval=cfg["capture"]["interval_sec"],
@@ -193,6 +210,8 @@ def create_app(cfg, loc, store, worker, sensor, settings):
         days = sorted(store.readings_days())
         i = days.index(day)
         return render_template("data_day.html", day=day, s=summary,
+                               night=night_info(day), has_stars=has_stars,
+                               latest_day=days[-1],
                                prev_day=days[i - 1] if i > 0 else None,
                                next_day=days[i + 1] if i < len(days) - 1 else None,
                                has_timelapse=store.timelapse_path(day).exists(),
@@ -243,7 +262,8 @@ def create_app(cfg, loc, store, worker, sensor, settings):
         return jsonify({"meta": meta,
                         "last_error": worker.last_error,
                         "sources": worker.last_sources,
-                        "observatory": obs})
+                        "observatory": obs,
+                        "allsky": worker.last_allsky or (meta or {}).get("allsky")})
 
     @app.route("/api/info")
     def api_info():
@@ -289,9 +309,17 @@ def create_app(cfg, loc, store, worker, sensor, settings):
         out = {"since": since, "count": len(lines), "open": p.suffix != ".gz",
                "latest_day": store.readings_days()[0],
                "t": [], "grid": [], "frame": [], **{k: [] for k in SCALAR_FIELDS},
+               **({"stars": []} if has_stars else {}),
                **{f"src_{n}": [] for n in labels},
                **{row["key"]: [] for row in obs_rows},
                **{row["detail"]: [] for row in obs_rows if row.get("detail")}}
+        # Star counts for records captured before CloudRoll recorded them live
+        # come from the night's calibration harvest (dark minutes only).
+        harvested = {}
+        if has_stars and calibration is not None:
+            cs = calibration.summary(day) if calibration.has_night(day) else None
+            if cs:
+                harvested = {round(t): v for t, v in zip(cs["t"], cs["stars"]) if v is not None}
         for line in lines[since:]:
             rec = json.loads(line)
             out["t"].append(datetime.fromisoformat(rec["time"]).timestamp() * 1000)
@@ -303,6 +331,11 @@ def create_app(cfg, loc, store, worker, sensor, settings):
             r = rec.get("readings", {})
             for k in SCALAR_FIELDS:
                 out[k].append(r.get(k))
+            if has_stars:
+                v = fresh_value(rec.get("allsky"), "stars", allsky_max_age)
+                if v is None and "allsky" not in rec:
+                    v = harvested.get(round(out["t"][-1]))
+                out["stars"].append(v)
             if obs_rows:
                 obs = rec.get("observatory") or {}
                 out["roof"].append(obs.get("roof"))
@@ -339,7 +372,9 @@ def create_app(cfg, loc, store, worker, sensor, settings):
 
     @app.route("/api/readings/<day>.csv")
     def api_readings_csv(day):
-        """Readings for a day as CSV, one row per capture.  With an observatory
+        """Readings for a day as CSV, one row per capture: sensor readings, the
+        allsky statistics (allsky_<name>, as recorded – check allsky_image_time for
+        freshness) and sun/moon position, blank before they were recorded.  With an observatory
         configured, the roof state and each rig's pier / NINA status, pointing and
         marker follow the readings.  ?grid=1 appends the frame ambient/sky temps
         and the 32×24 matrix as columns r00c00..r23c31 (blank for records captured
@@ -355,11 +390,15 @@ def create_app(cfg, loc, store, worker, sensor, settings):
             w = csv.writer(buf)
             obs_cols = (["roof"] + [f"{n}_{c}" for n in rig_labels for c, _ in RIG_CSV]
                         if obs_rows else [])
-            w.writerow(["time"] + SCALAR_FIELDS + obs_cols +
+            w.writerow(["time"] + SCALAR_FIELDS + [f"allsky_{k}" for k in allsky_keys] +
+                       ASTRO_KEYS + obs_cols +
                        (["frame_ambient", "frame_sky"] + grid_cols if grid else []))
             for rec in store.iter_readings(day):
                 r = rec.get("readings", {})
                 row = [rec["time"]] + ["" if r.get(k) is None else r[k] for k in SCALAR_FIELDS]
+                a = rec.get("allsky") or {}
+                row += [_blank(a.get(k)) for k in allsky_keys]
+                row += [_blank((rec.get("astro") or {}).get(k)) for k in ASTRO_KEYS]
                 if obs_rows:
                     obs = rec.get("observatory") or {}
                     row.append(_blank(obs.get("roof")))
@@ -403,6 +442,91 @@ def create_app(cfg, loc, store, worker, sensor, settings):
             abort(400)
         threading.Thread(target=worker.build, args=(day, lay), daemon=True).start()
         return jsonify({"status": "started", "day": day, "layout": lay})
+
+    # -- calibration ----------------------------------------------------------
+    @app.route("/calibration")
+    def calibration_page():
+        if calibration is None:
+            abort(404)
+        return render_template("calibration.html", nights=calibration.night_days(),
+                               sun_below=calibration.sun_below,
+                               clear_stars=calibration.clear_stars,
+                               labels_list=list(LABELS),
+                               allsky=calibration.allsky_source,
+                               scale=worker.color_scale() if worker else None)
+
+    @app.route("/api/calibration/nights.json")
+    def api_calibration_nights():
+        if calibration is None:
+            abort(404)
+        out = []
+        for day in calibration.night_days():
+            h = calibration.header(day) or {}
+            out.append({k: h.get(k) for k in ("night", "minutes", "with_stars", "with_pixels",
+                                               "history_source", "notes", "created")}
+                       | {"images": len(h.get("images") or [])})
+        return jsonify(out)
+
+    @app.route("/api/calibration/summary/<day>.json")
+    def api_calibration_summary(day):
+        check_day(day)
+        s = calibration.summary(day) if calibration else None
+        if s is None:
+            abort(404)
+        return jsonify(s)
+
+    @app.route("/api/calibration/labels.json")
+    def api_calibration_labels():
+        if calibration is None:
+            abort(404)
+        return jsonify(calibration.labels())
+
+    @app.route("/api/calibration/label", methods=["POST"])
+    def api_calibration_label():
+        if calibration is None:
+            abort(404)
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            saved = calibration.set_label(str(body.get("key", "")), body.get("label"),
+                                          str(body.get("note") or ""))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify({"key": body.get("key"), "saved": saved})
+
+    @app.route("/media/calibration/<day>/<stamp>.jpg")
+    def media_calibration_image(day, stamp):
+        check_day(day)
+        if calibration is None or not STAMP_RE.match(stamp):
+            abort(404)
+        p = calibration.image_path(day, f"{stamp}.jpg")
+        if p is None:
+            abort(404)
+        return send_from_directory(p.parent, p.name, max_age=86400)
+
+    @app.route("/media/calibration/<day>/<stamp>.ir.png")
+    def media_calibration_ir(day, stamp):
+        """The IR image of a calibration minute, rendered from the night file."""
+        check_day(day)
+        if calibration is None or not STAMP_RE.match(stamp):
+            abort(404)
+        m = calibration.minute(day, stamp)
+        if m is None or m.get("pixels") is None:
+            abort(404)
+        img = thermal_with_scale({"pixels": m["pixels"], "ambient": m["ambient"]},
+                                 m["color_scale"])
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        resp = Response(buf.getvalue(), mimetype="image/png")
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
+    @app.route("/media/calibration/nights/<day>.jsonl.gz")
+    def media_calibration_night(day):
+        check_day(day)
+        if calibration is None or not calibration.has_night(day):
+            abort(404)
+        return send_from_directory(calibration.nights, f"{day}.jsonl.gz", as_attachment=True,
+                                   max_age=0)
 
     # -- media --------------------------------------------------------------
     @app.route("/media/latest.jpg")

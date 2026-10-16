@@ -6,6 +6,7 @@
     {% if prev_day %}<a class="tbtn" href="{{ url_for('data_day', day=prev_day) }}">&#9664; {{ prev_day }}</a>{% else %}<span class="tbtn ghost">&#9664;</span>{% endif %}
     <h2>{{ day|nicedate }}{% if not s.compressed %} <span class="badge" id="open-badge">open</span>{% endif %}</h2>
     {% if next_day %}<a class="tbtn" href="{{ url_for('data_day', day=next_day) }}">{{ next_day }} &#9654;</a>{% else %}<span class="tbtn ghost">&#9654;</span>{% endif %}
+    {% if day != latest_day %}<a class="tbtn" href="{{ url_for('data_latest') }}" title="Back to today's live data">Now &#9197;</a>{% endif %}
   </div>
   <div class="stat-grid">
     <div class="stat-box"><div class="stat-label">Records</div><div class="stat-value" id="st-records">{{ s.records }}</div></div>
@@ -14,13 +15,17 @@
     <div class="stat-box"><div class="stat-label">Min Sky Temp</div><div class="stat-value sky-temp" id="st-sky">{{ '--' if s.sky_min is none else '%.1f °C'|format(s.sky_min) }}</div></div>
     <div class="stat-box"><div class="stat-label">Peak SQM</div><div class="stat-value" id="st-sqm">{{ '--' if s.sqm_max is none else '%.2f'|format(s.sqm_max) }}</div></div>
     <div class="stat-box"><div class="stat-label">Rain</div><div class="stat-value" id="st-rain">{{ s.rain_records }} min</div></div>
+    {% if has_stars %}<div class="stat-box"><div class="stat-label">Peak Stars</div><div class="stat-value" id="st-stars">--</div></div>{% endif %}
   </div>
+  {% include "_night_times.html" %}
   <p class="dl-row">
     <a class="tbtn" href="{{ url_for('api_readings_csv', day=day) }}" title="Readings only, one row per capture">Download CSV</a>
     <a class="tbtn" href="{{ url_for('api_readings_csv', day=day, grid=1) }}" title="Readings plus the 32×24 temperature grid as columns r00c00…r23c31">CSV + grids</a>
     <a class="tbtn" href="{{ url_for('media_readings', name=readings.name) }}">Download raw ({{ readings.name.split('.', 1)[1] }}, {{ '%.1f'|format(s.bytes / 1e6) }} MB)</a>
     {% if has_timelapse %}<a class="tbtn" href="{{ url_for('timelapse', day=day) }}">Watch timelapse</a>{% endif %}
     <a class="tbtn" href="{{ url_for('data_index') }}">All days</a>
+    <button type="button" class="tbtn" id="tap-toggle" aria-pressed="false"
+            title="On touch screens: whether touching a chart picks a record (turn off to scroll freely)">Chart taps: on</button>
     <span id="live-status" class="live-status" hidden></span>
   </p>
 </div>
@@ -32,6 +37,7 @@
     {% endif %}
     <div class="card"><h2>Temperature (°C)</h2><div class="legend" id="leg-temp"></div><div class="chart" id="c-temp" data-h="220"></div></div>
     <div class="card"><h2>Cloud Cover (%)</h2><div class="chart" id="c-cloud" data-h="150"></div></div>
+    {% if has_stars %}<div class="card"><h2>Allsky Star Count</h2><div class="chart" id="c-stars" data-h="150"></div></div>{% endif %}
     <div class="card"><h2>Sky Brightness (lux, log scale)</h2><div class="chart" id="c-lux" data-h="150"></div></div>
     <div class="card"><h2>Sky Quality (mag/arcsec²)</h2><div class="chart" id="c-sqm" data-h="150"></div></div>
     <div class="card"><h2>Pressure (hPa)</h2><div class="chart" id="c-pres" data-h="150"></div></div>
@@ -45,6 +51,7 @@
       <button class="tbtn" id="rec-prev" title="Previous record (←)">&#9664;</button>
       <span id="rec-pos" class="muted"></span>
       <button class="tbtn" id="rec-next" title="Next record (→)">&#9654;</button>
+      <button class="tbtn" id="rec-now" title="Latest record (End)">&#9197;</button>
       <a class="tbtn" id="rec-json" href="#" download>Record JSON</a>
       <a class="tbtn" id="rec-csv" href="#" download title="This record's temperatures as a 24 × 32 grid (°C)">Grid CSV</a>
     </div>
@@ -71,7 +78,7 @@
     <h3 class="rec-sub">Observatory</h3>
     <table id="rec-obs-table"></table>
     {% endif %}
-    <p class="muted">Click any chart to pick a record; ← / → step through them. Click an image to enlarge it. The IR image is re-rendered from the stored 32×24 grid using the colour scale in effect at capture.{% if cams %} Camera images are kept {{ frames_days }} days.{% endif %}</p>
+    <p class="muted">Click any chart to pick a record; ← / → step through them, ⏭ (End) jumps to the latest. Shading marks night (sunset to sunrise) and, darker, astronomical darkness. Click an image to enlarge it. The IR image is re-rendered from the stored 32×24 grid using the colour scale in effect at capture.{% if cams %} Camera images are kept {{ frames_days }} days.{% endif %}</p>
   </div>
 </div>
 
@@ -200,6 +207,9 @@ DataView.init({
   pollSec: {{ poll_sec|tojson }},
   onSelect: showCams,
   obs: {{ obs_rows|tojson }},
+  stars: {{ has_stars|tojson }},
+  night: {{ night|tojson }},
+  latestUrl: {{ (url_for('data_latest') if day != latest_day else None)|tojson }},
 });
 </script>
 {% endblock %}

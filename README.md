@@ -27,6 +27,10 @@ images, are kept for `retention.frames_days` (7 by default) so recent days can b
 frame by frame or re-encoded in another layout; the video and numeric data are kept
 long-term.
 
+With an allsky camera that publishes its **star count** to Home Assistant, CloudRoll
+records it with every capture and keeps a long-running **calibration dataset** for the
+sensor's cloud-cover thresholds, with a review page. See [CALIBRATION.md](CALIBRATION.md).
+
 ## Data layout
 
 ```
@@ -40,16 +44,22 @@ data/timelapses/<date>.mp4/.jpg/.json main video, poster, metadata
 data/timelapses/<date>.<layout>.mp4   further layouts of the same day, with their posters
 data/timelapses/<date>[.<layout>].run.mp4/.jpg  the night's imaging run, cut from that day video
 data/settings.json                    runtime settings changed from the web UI
+data/calibration/                     calibration dataset: night files, sampled images, labels (CALIBRATION.md)
 ```
 
 Each readings record looks like
-`{"time", "frame", "window", "readings": {...}, "color_scale": {...}, "ambient", "sky", "pixels": [[...32]×24]}`
+`{"time", "frame", "window", "readings": {...}, "color_scale": {...}, "ambient", "sky", "pixels": [[...32]×24], "astro": {...}}`
+plus `allsky` and `sensor_cloud` when configured (see CALIBRATION.md)
 (about 5 KB raw, ~1.7 KB gzipped, so roughly 2.5 MB/day once compressed).
 
 The **Data** page lists stored days by month with summary stats and CSV / raw downloads.
 Each day's view charts every reading over the window (hover for values, click to select)
 and shows the selected record's values plus its temperature grid, re-rendered with the
-colour scale that was in effect at capture.
+colour scale that was in effect at capture. Charts are shaded from sunset to sunrise, darker
+during astronomical darkness, with the night's times above them. **Now ⏭** (or the End key)
+jumps back to the latest record, from any day. On touch screens, **Chart taps** turns
+tap-to-select on the charts on or off (per browser; off by default on phones, so the page
+scrolls freely).
 
 | Endpoint | Returns |
 |----------|---------|
@@ -62,6 +72,10 @@ colour scale that was in effect at capture.
 | `/media/readings/<date>.jsonl[.gz]` | the raw day file |
 | `/media/sources/<date>/<source>/<stamp>.jpg` | a source's original image (while frames are kept) |
 | `/api/settings` | GET / POST the runtime settings (see below) |
+| `/calibration` | the calibration review page |
+| `/api/calibration/nights.json`, `/summary/<night>.json` | harvested nights; one night's page summary |
+| `/api/calibration/labels.json`, `POST /api/calibration/label` | image labels (`{"key": "<night>/<stamp>", "label", "note"}`) |
+| `/media/calibration/nights/<night>.jsonl.gz` | a standalone night file |
 
 ## Setup
 
@@ -74,8 +88,9 @@ cp config.example.json config.json      # then set sensor.host and location
 ```
 
 Other commands: `capture` (one frame), `build [YYYY-MM-DD] [--layout NAME|both]` (rebuild a
-day's timelapse; while its frames are kept, in any layout). `info` also test-fetches each
-image source.
+day's timelapse; while its frames are kept, in any layout), `calibrate [DATE …|--all]
+[--history FILE]` (harvest calibration nights by hand; see CALIBRATION.md). `info` also
+test-fetches each image source.
 
 To run at boot behind an Apache HTTPS proxy:
 
@@ -113,6 +128,8 @@ Copied from `config.example.json`; it holds your site's details and is not track
 | `layouts` | Source names that each get a layout with themselves as the large image (default: all sources, in order) |
 | `source_timeout_sec` | Per-fetch timeout for image sources |
 | `observatory` | Optional roof and telescope status, and pointing markers on the allsky image – see below |
+| `allsky_stats` | Optional HA entities from the allsky camera (star count, SQM, …) recorded with each capture – see CALIBRATION.md |
+| `calibration` | Nightly calibration harvest: dark-minute threshold, images per night, … – see CALIBRATION.md |
 
 ## Image sources
 
@@ -300,6 +317,8 @@ The card reads `/api/info` (days, cameras, time zone) and the same
 
 ## Roadmap
 
+* **Star count on the Home Assistant card** – the card builds its charts before it knows
+  whether a site records star counts; it needs `/api/info` to say so first.
 * **Lens calibration tool** – fit the allsky `lens` model from a clear-night frame by
   matching stars to a catalogue (currently a separate script).
 * **Telescope markers on the Home Assistant card** – draw them from the records'

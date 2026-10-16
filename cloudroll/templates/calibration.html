@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Calibration · {{ title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Cloud-cover calibration</h2>
+  <p class="muted cal-intro">Each night CloudRoll keeps every dark minute (sun below {{ sun_below }}°): the IR sensor's
+    raw frame and settings next to the allsky camera's star count, plus a few allsky images for review.
+    A clear moonless sky shows ~{{ clear_stars }}+ stars; overcast shows almost none. Use this page to check
+    whether the sensor's Clear Δ / Overcast Δ still fit, and to try others before changing them on the sensor.</p>
+  <div class="cal-controls">
+    <label>Nights
+      <select id="f-range">
+        <option value="7">Last 7</option>
+        <option value="30" selected>Last 30</option>
+        <option value="90">Last 90</option>
+        <option value="0">All</option>
+      </select></label>
+    <label><input type="checkbox" id="f-moon" checked> Moon down only</label>
+    <label>Clear sky: stars ≥ <input type="number" id="f-clear" value="800" min="1" step="50"></label>
+    <label>Overcast: stars &lt; <input type="number" id="f-over" value="50" min="1" step="10"></label>
+    <span id="cal-status" class="muted" role="status">Loading…</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="stat-grid">
+    <div class="stat-box"><div class="stat-label">Nights</div><div class="stat-value" id="t-nights">--</div></div>
+    <div class="stat-box"><div class="stat-label">Dark minutes</div><div class="stat-value" id="t-minutes">--</div></div>
+    <div class="stat-box"><div class="stat-label">Clear minutes</div><div class="stat-value" id="t-clear">--</div></div>
+    <div class="stat-box"><div class="stat-label">Overcast minutes</div><div class="stat-value" id="t-over">--</div></div>
+    <div class="stat-box"><div class="stat-label">Sensor Clear / Overcast Δ</div><div class="stat-value" id="t-thr">--</div></div>
+    <div class="stat-box"><div class="stat-label">Clear minutes read cloudy</div><div class="stat-value" id="t-false">--</div></div>
+  </div>
+  <p class="muted">"Read cloudy" = the sensor reported at least the cloudy threshold below while the allsky camera saw a clear sky. Values use the thresholds in effect at the time.</p>
+</div>
+
+<div class="card">
+  <h2>What if…</h2>
+  <p class="muted">Replays the sensor's per-pixel cloud cover over the selected minutes with other thresholds (to within ~0.5 %).</p>
+  <div class="cal-controls">
+    <label>Clear Δ <input type="number" id="w-clear" step="0.5"></label>
+    <label>Overcast Δ <input type="number" id="w-over" step="0.5"></label>
+    <label>Cloudy at ≥ <input type="number" id="w-cloudy" value="20" min="1" max="99" step="5"> %</label>
+    <button type="button" class="tbtn" id="w-current">Current settings</button>
+    <button type="button" class="tbtn" id="w-fit" title="Grid search for the Clear/Overcast pair that best matches the star counts">Best fit</button>
+    <span id="w-msg" class="muted" role="status"></span>
+  </div>
+  <div class="table-wrap"><table class="data-table" id="w-table"></table></div>
+</div>
+
+<div class="card">
+  <h2>Sky Δ (ambient − sky) vs <span id="sc-xname">ambient</span></h2>
+  <div class="cal-controls">
+    <span class="muted">X axis:</span>
+    <button type="button" class="tbtn act" data-x="ambient">Ambient</button>
+    <button type="button" class="tbtn" data-x="dew">Dew point</button>
+  </div>
+  <div class="legend" id="sc-legend"></div>
+  <div class="chart" id="sc" data-h="380"></div>
+  <p class="muted" id="sc-fit"></p>
+  <p class="muted">Each dot is one dark minute: the median Δ over the sensor's cloud region, coloured by the allsky star count. Horizontal lines are the sensor's thresholds (solid) and the what-if pair (dashed). The sloped line is a straight-line fit through the clear minutes: if clear skies drift away from the solid Clear Δ line as the season changes, it's time to re-tune.</p>
+</div>
+
+<div class="card">
+  <h2>By month</h2>
+  <div class="table-wrap"><table class="data-table" id="m-table"></table></div>
+  <p class="muted">⚠ marks a month whose clear nights were colder than any earlier month: the fixed thresholds haven't been checked at those temperatures.</p>
+</div>
+
+<div class="card">
+  <h2>Image review <span class="muted" id="r-progress"></span></h2>
+  <div class="cal-controls">
+    <label>Night <select id="r-night"><option value="">All shown nights</option></select></label>
+    <label><input type="checkbox" id="r-unlabelled"> Unlabelled only</label>
+  </div>
+  <p class="muted">Each night keeps about a dozen allsky images: some where the sensor and the star count disagree most, one from each star-count band, and some at random. Label what you see; labels are saved straight away and become ground truth that's better than star count for thin cloud, smoke or dew.</p>
+  <div class="review-grid" id="r-grid"></div>
+  <h3 class="rec-sub">Labels vs sensor</h3>
+  <div class="table-wrap"><table class="data-table" id="r-table"></table></div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Nights harvested ({{ nights|length }})</summary>
+    <div class="table-wrap"><table class="data-table" id="n-table"></table></div>
+    <p class="muted">Night files (<code>data/calibration/nights/</code>) hold everything: raw frames, sensor settings, star counts, sun and moon. Download one for offline analysis; the format is described in CALIBRATION.md.</p>
+  </details>
+</div>
+
+<dialog id="zoom" class="zoom" aria-labelledby="zoom-title">
+  <div class="zoom-head">
+    <h2 id="zoom-title"></h2>
+    <button type="button" class="tbtn" id="zoom-close">Close</button>
+  </div>
+  <div class="zoom-body zoom-pair">
+    <img id="zoom-sky" alt="">
+    <img id="zoom-ir" alt="">
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CAL = {
+  nights: {{ nights|tojson }},
+  labels: {{ labels_list|tojson }},
+  tz: {{ location.tz.key|tojson }},
+  clearStars: {{ clear_stars|tojson }},
+  summaryBase: {{ url_for('api_calibration_summary', day='0000-00-00')[:-15]|tojson }},
+  labelsUrl: {{ url_for('api_calibration_labels')|tojson }},
+  labelUrl: {{ url_for('api_calibration_label')|tojson }},
+  mediaBase: {{ url_for('media_calibration_image', day='0000-00-00', stamp='x')[:-16]|tojson }},
+  nightsUrl: {{ url_for('api_calibration_nights')|tojson }},
+  downloadBase: {{ url_for('media_calibration_night', day='0000-00-00')[:-19]|tojson }},
+  current: {{ ({'clear': scale.clear_delta, 'overcast': scale.overcast_delta} if scale else None)|tojson }},
+};
+</script>
+<script src="{{ static_url('calibration.js') }}"></script>
+{% endblock %}

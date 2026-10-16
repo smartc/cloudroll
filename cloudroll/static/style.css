@@ -154,3 +154,36 @@ details[open] summary { margin-bottom: 10px; }
 .zoom-body img { max-width: 100%; max-height: calc(94vh - 90px); object-fit: contain; border-radius: 6px;
                  display: block; }
 .zoom-body .cam-empty-msg { width: 100%; padding: 80px 20px; font-size: 1em; }
+
+/* Calibration page */
+.cal-intro { max-width: 70em; }
+.cal-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 6px 0 10px; }
+.cal-controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; }
+.cal-controls input[type=number], .cal-controls select, .label-note {
+  background: #1a1a2e; color: #e0e0e0; border: 1px solid #2d3561; border-radius: 4px; padding: 4px 6px; font: inherit; }
+.cal-controls input[type=number] { width: 5.5em; }
+.cal-controls input[type=checkbox] { accent-color: #4a90d9; }
+.data-table i.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.review-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.review-card { margin: 0; background: #0f3460; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.review-imgs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0; border: 0; background: none; }
+.review-imgs img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; background: #1a1a2e; display: block; }
+.review-imgs img + img { object-fit: contain; }
+.review-card figcaption { font-size: 0.82em; }
+.label-btns { display: flex; flex-wrap: wrap; gap: 2px; }
+.label-btns .tbtn { padding: 5px 8px; text-transform: capitalize; }
+.label-note { width: 100%; font-size: 0.85em; }
+.zoom-pair { gap: 10px; flex-wrap: wrap; }
+.zoom-pair img { max-width: calc(50% - 5px); }
+@media (max-width: 700px) { .zoom-pair img { max-width: 100%; } }
+
+/* Sunset / darkness / sunrise line (Data and Live pages) */
+.night-times { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 22px; margin-top: 12px;
+               font-size: 0.85em; color: #8899aa; }
+.night-times b { color: #e0e0e0; font-weight: normal; font-variant-numeric: tabular-nums; }
+.month-nav .tbtn + .tbtn { margin-left: 0; }
+@media (max-width: 600px) {
+  /* Day title on its own row above the prev / next / Now buttons. */
+  .month-nav { flex-wrap: wrap; }
+  .month-nav h2 { order: -1; flex-basis: 100%; }
+}

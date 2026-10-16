@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image
 
 from .render import compose_frame, compose_layout
-from .sun import window_bounds, window_date_for
+from .sun import sky_position, window_bounds, window_date_for
 from .timelapse import build_timelapse
 
 log = logging.getLogger(__name__)
@@ -19,6 +19,8 @@ HOUSEKEEP_EVERY_SEC = 600
 # Grace period after a window closes before finalising it, so a capture that
 # started just before the boundary has finished writing to the old day.
 FINALISE_GRACE = timedelta(minutes=2)
+# Home Assistant's recorder keeps about this many days of history by default.
+HA_HISTORY_DAYS = 9
 
 
 def round_to_second(dt):
@@ -27,9 +29,13 @@ def round_to_second(dt):
 
 
 class Worker:
-    def __init__(self, cfg, loc, store, sensor, sources, settings, observatory=None):
+    def __init__(self, cfg, loc, store, sensor, sources, settings, observatory=None,
+                 skystats=None, calibration=None):
         self.cfg, self.loc, self.store, self.sensor = cfg, loc, store, sensor
         self.sources, self.settings = sources, settings
+        self.skystats = skystats if skystats and skystats.enabled else None
+        self.calibration = calibration
+        self.last_allsky = None
         self.observatory = observatory if observatory and observatory.enabled else None
         self.last_observatory = None
         self.offset = cfg["timelapse"]["offset_after_sunrise_min"]
@@ -41,7 +47,7 @@ class Worker:
         # Width/height of each source's last good image, so a missing image keeps
         # its usual shape in the layout.  Seeded from config "aspect" if given.
         self._aspects = {s["name"]: s["aspect"] for s in cfg["sources"] if s.get("aspect")}
-        n = len(cfg["sources"]) + (1 if self.observatory else 0)
+        n = len(cfg["sources"]) + (1 if self.observatory else 0) + (1 if self.skystats else 0)
         self._pool = ThreadPoolExecutor(max_workers=n, thread_name_prefix="source") if n else None
 
     def source_aspect(self, name):
@@ -74,11 +80,13 @@ class Worker:
         # snapshot alone can take ~5 s.
         futures = [self._pool.submit(self.sources.fetch, src) for src in self.cfg["sources"]]
         obs_f = self._pool.submit(self.observatory.read, now) if self.observatory else None
+        stats_f = self._pool.submit(self.skystats.read) if self.skystats else None
         matrix = self.sensor.thermal_matrix()
         readings = self.sensor.readings()
         scale = self.color_scale()
         panels = [f.result() for f in futures]
         obs = obs_f.result() if obs_f else None
+        stats = stats_f.result() if stats_f else None
         if obs:
             panels = [self._mark(p, obs, now) for p in panels]
         local = now.astimezone(self.loc.tz)
@@ -102,7 +110,14 @@ class Worker:
             "time": local.isoformat(), "frame": path.name, "window": wdate.isoformat(),
             "readings": readings, "color_scale": scale,
             "ambient": matrix["ambient"], "sky": matrix["sky"], "pixels": matrix["pixels"],
+            "astro": sky_position(self.loc, now),
         }
+        cloud_cfg = self.sensor.cloud_config()
+        if cloud_cfg:
+            record["sensor_cloud"] = cloud_cfg
+        if stats is not None:
+            record["allsky"] = stats
+            self.last_allsky = {**stats, "time": local.isoformat()}
         if obs:
             record["observatory"] = {**obs.as_dict(), "style": self.settings.scope_marker}
             self.last_observatory = {**obs.as_dict(), "time": local.isoformat()}
@@ -150,6 +165,12 @@ class Worker:
         with self._build_lock:
             days = set(self.store.frame_days())
             days |= {p.name[:10] for p in self.store.readings.glob("*.jsonl")}
+            if self.calibration and self.calibration.enabled:
+                # Nights still within Home Assistant's history (~10 days) that
+                # haven't been harvested, even if their frames are gone.
+                recent = (now - timedelta(days=HA_HISTORY_DAYS)).date().isoformat()
+                days |= {d for d in self.store.readings_days()
+                         if d >= recent and not self.calibration.has_night(d)}
             for day in sorted(days):
                 _, end = window_bounds(self.loc, datetime.fromisoformat(day).date(), self.offset)
                 if now < end + FINALISE_GRACE:
@@ -161,6 +182,12 @@ class Worker:
                         build_timelapse(self.store, self.loc, self.cfg, day, layout)
                     log.info("Finalised %s", day)
                 self.store.compress_readings(day)
+                if self.calibration and self.calibration.enabled \
+                        and not self.calibration.has_night(day):
+                    try:
+                        self.calibration.harvest(day)
+                    except Exception:  # noqa: BLE001 – retried at the next housekeeping pass
+                        log.exception("Calibration harvest for %s failed", day)
 
     def build(self, day, layout=None):
         """Build one day's timelapse in the given layout(s); returns the metadata."""

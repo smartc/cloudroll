@@ -16,6 +16,8 @@
   </div>
   <div id="source-status" class="status"></div>
   <div id="observatory-status" class="status"></div>
+  {% if has_stars %}<div id="allsky-status" class="status"></div>{% endif %}
+  {% include "_night_times.html" %}
   <div class="status">Current timelapse window: {{ window_start.strftime('%a %H:%M') }} → {{ window_end.strftime('%a %H:%M') }} (sunrise + {{ offset }} min)</div>
 </div>
 
@@ -128,6 +130,18 @@ function showObservatory(obs) {
   });
 }
 
+const ALLSKY_MAX_AGE = {{ allsky_max_age|tojson }};
+function showAllsky(a) {
+  const el = document.getElementById('allsky-status');
+  if (!el) return;
+  if (!a || a.stars === null || a.stars === undefined) { el.textContent = ''; return; }
+  const age = a.image_age_sec ?? (a.age_sec || {}).stars;
+  const stale = age !== undefined && age > ALLSKY_MAX_AGE;
+  el.textContent = `Allsky: ${a.stars} stars` + (a.sqm !== undefined && a.sqm !== null ? ` · SQM ${a.sqm}` : '') +
+                   (stale ? ` (stale, ${Math.round(age / 60)} min old)` : '');
+  el.classList.toggle('err', stale);
+}
+
 async function poll() {
   try {
     const r = await fetch("{{ url_for('api_latest') }}", {cache: "no-store"});
@@ -149,6 +163,7 @@ async function poll() {
     }
     showSources(j.sources);
     showObservatory(j.observatory);
+    showAllsky(j.allsky);
   } catch (e) { /* server restarting – try again next tick */ }
 }
 setInterval(poll, Math.min(INTERVAL, 30000));

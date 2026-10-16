@@ -7,16 +7,24 @@
                                      window) in the given layout(s) (default: runtime setting)
   python -m cloudroll info           show resolved location, windows, image sources and
                                      observatory status (read-only)
+  python -m cloudroll calibrate [DATE …|--all] [--history FILE] [--force]
+                                     harvest the calibration dataset for finished nights
+                                     (default: every finished night not yet harvested);
+                                     --history uses a saved HA history export for nights
+                                     HA no longer has (see CALIBRATION.md)
 """
 
 import argparse
 import logging
 from datetime import datetime, timedelta
 
+from .calibration import Calibration
 from .config import load_config, resolve_location
+from .hass import HomeAssistant
 from .observatory import Observatory
 from .sensor import SensorClient
 from .settings import Settings
+from .skystats import AllskyStats
 from .sources import SourceClient
 from .store import Store
 from .sun import window_bounds, window_date_for
@@ -33,6 +41,11 @@ def main():
     b.add_argument("date", nargs="?")
     b.add_argument("--layout", help="layout name, or 'both' for every configured layout")
     sub.add_parser("info")
+    c = sub.add_parser("calibrate")
+    c.add_argument("dates", nargs="*")
+    c.add_argument("--all", action="store_true", help="re-harvest every night with readings")
+    c.add_argument("--history", help="saved HA /api/history JSON (.json or .json.gz)")
+    c.add_argument("--force", action="store_true", help="also harvest a window still open")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
@@ -46,7 +59,10 @@ def main():
     sources = SourceClient(cfg)
     settings = Settings(cfg)
     observatory = Observatory(cfg, loc)
-    worker = Worker(cfg, loc, store, sensor, sources, settings, observatory)
+    ha = HomeAssistant(cfg)
+    skystats = AllskyStats(cfg, ha)
+    calibration = Calibration(cfg, loc, store, ha, skystats)
+    worker = Worker(cfg, loc, store, sensor, sources, settings, observatory, skystats, calibration)
     offset = cfg["timelapse"]["offset_after_sunrise_min"]
 
     if args.cmd == "info":
@@ -91,11 +107,30 @@ def main():
         except ValueError as e:
             raise SystemExit(str(e))
         print(meta if meta else f"No timelapse built for {day}")
+    elif args.cmd == "calibrate":
+        from .calibration import load_history_file
+        history = load_history_file(args.history) if args.history else None
+        current = window_date_for(loc, datetime.now(loc.tz), offset).isoformat()
+        days = args.dates or [d for d in sorted(store.readings_days())
+                              if (args.all or not calibration.has_night(d))
+                              and (d != current or args.force)]
+        for day in days:
+            try:
+                h = calibration.harvest(day, history=history, force=args.force)
+            except ValueError as e:
+                print(f"{day}: {e}")
+                continue
+            if h is None:
+                print(f"{day}: no readings")
+            else:
+                print(f"{day}: {h['minutes']} dark minutes, {h['with_stars']} with stars, "
+                      f"{len(h['images'])} images, history {h['history_source']}"
+                      + (f"  ({'; '.join(h['notes'])})" if h["notes"] else ""))
     elif args.cmd == "run":
         from waitress import serve
         from .web import create_app
         worker.start()
-        app = create_app(cfg, loc, store, worker, sensor, settings)
+        app = create_app(cfg, loc, store, worker, sensor, settings, calibration)
         w = cfg["web"]
         logging.info("Web UI on http://%s:%d/", w["host"], w["port"])
         serve(app, host=w["host"], port=w["port"], threads=6, ident="CloudRoll")

@@ -14,6 +14,7 @@
   <a href="{{ url_for('data_latest') }}" {% if request.endpoint in ('data_latest', 'data_index', 'data_day') %}class="act"{% endif %}>Data</a>
   <a href="{{ url_for('timelapses') }}" {% if request.endpoint in ('timelapses', 'timelapse', 'day_view') %}class="act"{% endif %}>Timelapses</a>
   <a href="{{ url_for('live') }}" {% if request.endpoint == 'live' %}class="act"{% endif %}>Live</a>
+  {% if has_calibration %}<a href="{{ url_for('calibration_page') }}" {% if request.endpoint == 'calibration_page' %}class="act"{% endif %}>Calibration</a>{% endif %}
   <a href="{{ sensor_url }}" target="_blank" rel="noopener">Sky Sensor &#8599;</a>
   {% for l in source_links %}<a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.label }} &#8599;</a>
   {% endfor %}

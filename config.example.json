@@ -130,5 +130,28 @@
       "k3": 0.44
     },
     "timeout_sec": 3
+  },
+  "allsky_stats": {
+    "entities": {},
+    "max_age_sec": 300,
+    "_entities_example": {
+      "stars": "sensor.allsky_stars",
+      "sqm": "sensor.allsky_sqm",
+      "exposure": "sensor.allsky_exposure",
+      "gain": "sensor.allsky_camera_gain",
+      "moon_mode": "binary_sensor.allsky_moon_mode",
+      "night": "binary_sensor.allsky_night",
+      "dew_heater": "sensor.allsky_dew_heater_level",
+      "smoke": "sensor.allsky_smoke_rating",
+      "image_time": "sensor.allsky_exposure_date"
+    }
+  },
+  "calibration": {
+    "enabled": true,
+    "sun_below_deg": -18,
+    "images_per_night": 12,
+    "image_width": 1024,
+    "clear_stars": 1000,
+    "history_entities": {}
   }
 }

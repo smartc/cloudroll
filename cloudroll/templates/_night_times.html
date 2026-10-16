@@ -1,0 +1,6 @@
+{# Sunset / astronomical darkness / sunrise for one night (dict from web.night_info). #}
+<div class="night-times">
+  <span title="Sunset">&#9790; Sunset <b>{{ night.sunset.hm if night.sunset else '--' }}</b></span>
+  <span title="Astronomical darkness: sun more than 18° below the horizon">&#9733; Dark <b>{% if night.dusk and night.dawn %}{{ night.dusk.hm }}–{{ night.dawn.hm }}{% else %}none{% endif %}</b></span>
+  <span title="Sunrise">&#9788; Sunrise <b>{{ night.sunrise.hm if night.sunrise else '--' }}</b></span>
+</div>

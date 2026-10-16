@@ -15,6 +15,9 @@ const DataView = (() => {
       { key: 'sky_temp', label: 'Sky', color: '#a29bfe' }] },
     { id: 'c-cloud', unit: '%', digits: 0, min: 0, max: 100,
       series: [{ key: 'cloud_cover', label: 'Cloud cover', color: '#dfe6e9' }] },
+    // Only on pages with allsky statistics (the chart element is absent otherwise).
+    { id: 'c-stars', unit: 'stars', digits: 0, min: 0,
+      series: [{ key: 'stars', label: 'Stars', color: '#55efc4' }] },
     { id: 'c-lux', unit: 'lx', log: true,
       series: [{ key: 'brightness', label: 'Brightness', color: '#fdcb6e' }] },
     { id: 'c-sqm', unit: 'mag/arcsec²', digits: 2,
@@ -34,6 +37,10 @@ const DataView = (() => {
     ['humidity', 'Humidity', v => v.toFixed(1) + ' %'],
     ['raining', 'Rain', v => v ? 'Raining' : 'Dry'],
   ];
+  const STARS_ROW = ['stars', 'Allsky Stars', v => v.toFixed(0)];
+  // Night shading: sunset→sunrise, darker during astronomical darkness.
+  const NIGHT = 'rgba(0, 0, 0, 0.16)', DARK = 'rgba(0, 0, 0, 0.30)';
+  const TAP_KEY = 'cloudroll.chartTaps';
   const P = { t: 10, r: 14, b: 22, l: 56 };
   // Observatory states (roof, pier, NINA) in the status strip; unlisted
   // states (offline, no data) are left empty.
@@ -55,6 +62,7 @@ const DataView = (() => {
   function fmtVal(c, v) {
     if (v === null || v === undefined) return '--';
     if (c.log) return fmtLux(v);
+    if (c.unit === 'stars') return v.toFixed(0);
     return v.toFixed(c.digits ?? 1) + (c.unit === '%' ? ' %' : c.unit === '°C' ? ' °C' : '');
   }
 
@@ -72,6 +80,7 @@ const DataView = (() => {
       cv.addEventListener('mouseleave', () => setHover(-1));
       cv.addEventListener('click', e => select(idxAt(el, e.offsetX)));
       cv.addEventListener('touchstart', e => {
+        if (!tapsOn()) return;
         const r = cv.getBoundingClientRect();
         select(idxAt(el, e.touches[0].clientX - r.left));
       }, { passive: true });
@@ -109,6 +118,21 @@ const DataView = (() => {
     }
   }
 
+  // Night and astronomical darkness behind the data (drawn before the grid).
+  function shade(g) {
+    const n = cfg.night;
+    if (!n || !D.t.length) return;
+    const { ctx, cw, ch } = g;
+    const band = (a, b, color) => {
+      if (!a || !b) return;
+      const x1 = Math.max(P.l, P.l + (a.ms - t0()) / tSpan() * cw);
+      const x2 = Math.min(P.l + cw, P.l + (b.ms - t0()) / tSpan() * cw);
+      if (x2 > x1) { ctx.fillStyle = color; ctx.fillRect(x1, P.t, x2 - x1, ch); }
+    };
+    band(n.sunset, n.sunrise, NIGHT);
+    band(n.dusk, n.dawn, DARK);
+  }
+
   function markers(g) {
     const { ctx, ch } = g;
     if (sel >= 0) {
@@ -127,13 +151,15 @@ const DataView = (() => {
   // ── line chart ──────────────────────────────────────────────────────────
   function drawLine(c) {
     const el = document.getElementById(c.id);
+    if (!el) return;
     const g = setup(el);
     const { ctx, W, H, cw, ch } = g;
     ctx.fillStyle = C.plot; ctx.fillRect(0, 0, W, H);
+    shade(g);
 
     const tf = c.log ? (v => (v > 0 ? Math.log10(v) : null)) : (v => v);
     let mn = Infinity, mx = -Infinity;
-    for (const s of c.series) for (const v of D[s.key]) {
+    for (const s of c.series) for (const v of D[s.key] || []) {
       const y = v === null ? null : tf(v);
       if (y !== null && isFinite(y)) { mn = Math.min(mn, y); mx = Math.max(mx, y); }
     }
@@ -142,7 +168,8 @@ const DataView = (() => {
       ctx.fillText('No data for this metric', W / 2, H / 2);
       return;
     }
-    if (c.min !== undefined) { mn = c.min; mx = c.max; }
+    if (c.min !== undefined && c.max !== undefined) { mn = c.min; mx = c.max; }
+    else if (c.min !== undefined) { mn = c.min; mx = mx > mn ? mx * 1.08 : mn + 1; }
     else if (c.log) { mn = Math.floor(mn); mx = Math.max(Math.ceil(mx), mn + 1); }
     else { const sp = (mx - mn) || 1; mn -= sp * 0.08; mx += sp * 0.08; }
     const yOf = y => P.t + (1 - (y - mn) / (mx - mn)) * ch;
@@ -218,6 +245,7 @@ const DataView = (() => {
     const g = setup(el);
     const { ctx, W, H } = g;
     ctx.fillStyle = C.plot; ctx.fillRect(0, 0, W, H);
+    shade(g);
     const n = D.t.length;
     OBS.forEach((row, lane) => {
       const y = P.t + lane * LANE_H;
@@ -311,13 +339,16 @@ const DataView = (() => {
         tr.append(th, td); return tr;
       }));
     };
-    fill('rec-table', ROWS);
+    fill('rec-table', rows());
     fill('rec-obs-table', OBS_ROWS);
     try { history.replaceState(null, '', '#' + i); } catch (e) { /* ignore */ }
     if (cfg.onSelect) cfg.onSelect(i, D);
   }
 
+  function rows() { return cfg.stars ? [...ROWS.slice(0, 3), STARS_ROW, ...ROWS.slice(3)] : ROWS; }
+
   function buildTable(force) {
+    const ROWS = rows();
     const tbl = document.getElementById('all-table');
     if (tbl.rows.length && !force) return;
     tbl.replaceChildren();
@@ -379,13 +410,41 @@ const DataView = (() => {
     window.addEventListener('resize', drawAll);
     document.getElementById('rec-prev').onclick = () => select(sel - 1);
     document.getElementById('rec-next').onclick = () => select(sel + 1);
+    document.getElementById('rec-now').onclick = now;
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT') return;
       if (e.key === 'ArrowLeft') { select(sel - 1); e.preventDefault(); }
       if (e.key === 'ArrowRight') { select(sel + 1); e.preventDefault(); }
+      if (e.key === 'End') { now(); e.preventDefault(); }
     });
+    const tap = document.getElementById('tap-toggle');
+    if (tap) {
+      const show = () => { const on = tapsOn(); tap.textContent = 'Chart taps: ' + (on ? 'on' : 'off');
+                           tap.setAttribute('aria-pressed', on); tap.classList.toggle('act', on); };
+      tap.onclick = () => { try { localStorage.setItem(TAP_KEY, tapsOn() ? 'off' : 'on'); } catch (e) { /* storage blocked */ }
+                            tapsOn.v = !tapsOn(); show(); };
+      show();
+    }
     document.getElementById('tbl-details').addEventListener('toggle', e => { if (e.target.open) buildTable(); });
     if (cfg.live) startPolling();
+  }
+
+  // The newest record: on an older day, go to today's page (which follows live data).
+  function now() {
+    if (cfg.latestUrl) { location.href = cfg.latestUrl; return; }
+    select(D.t.length - 1);
+    document.getElementById('record').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // Whether touching a chart picks a record.  Per browser; off by default on
+  // touch-first devices, where it fights with scrolling the page.
+  function tapsOn() {
+    if (tapsOn.v === undefined) {
+      let v = null;
+      try { v = localStorage.getItem(TAP_KEY); } catch (e) { /* storage blocked */ }
+      tapsOn.v = v ? v === 'on' : !window.matchMedia('(pointer: coarse)').matches;
+    }
+    return tapsOn.v;
   }
 
   function computeGap() {
@@ -405,6 +464,7 @@ const DataView = (() => {
     set('st-sky', sky.length ? Math.min(...sky).toFixed(1) + ' °C' : '--');
     set('st-sqm', sqm.length ? Math.max(...sqm).toFixed(2) : '--');
     set('st-rain', D.raining.filter(v => v).length + ' min');
+    if (D.stars) { const st = vals('stars'); set('st-stars', st.length ? Math.max(...st).toFixed(0) : '--'); }
   }
 
   // ── live updates for the day still being recorded ───────────────────────

@@ -57,6 +57,20 @@ DEFAULTS = {
     # capture renders all of them.  Defaults to every source, in config order.
     "layouts": None,
     "source_timeout_sec": 15,
+    # Optional allsky statistics (star count, SQM, …) read from Home Assistant
+    # entities and stored with each capture.  See cloudroll/skystats.py.
+    "allsky_stats": {"entities": {}, "max_age_sec": 300},
+    # Nightly calibration harvest: a standalone dataset of dark minutes (frames,
+    # sensor settings, star counts, sun/moon) plus a few sampled allsky images.
+    # See CALIBRATION.md.
+    "calibration": {
+        "enabled": True,
+        "sun_below_deg": -18,       # a minute is "dark" when the sun is below this
+        "images_per_night": 12,     # sampled allsky images kept for review
+        "image_width": 1024,        # sampled images are downscaled to this width
+        "clear_stars": 1000,        # star count treated as a fully clear sky
+        "history_entities": {},     # extra HA entities to harvest each night
+    },
     # Optional roof / park sensor status and telescope markers on the allsky image.
     # Read-only: CloudRoll only ever GETs these devices.  See README "Observatory".
     "observatory": {

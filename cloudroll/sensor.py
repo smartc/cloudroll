@@ -6,6 +6,7 @@ Sources:
   * Alpaca safetymonitor/0/issafe      – rain relay (unsafe = wet)
   * WebSocket :81 text message         – pressure (not exposed via Alpaca)
   * HTTP  /setup                       – heatmap colour-scale settings (for mode "sensor")
+                                         and the cloud-cover algorithm settings
 """
 
 import json
@@ -39,6 +40,7 @@ class SensorClient:
         self.session = requests.Session()
         self._scale_cache = None
         self._scale_time = 0.0
+        self._cloud_cache = None
 
     def web_url(self):
         return self.http + "/"
@@ -111,6 +113,20 @@ class SensorClient:
             m = re.search(rf"name='{name}'[^>]*value='(-?[0-9.]+)'", html)
             return float(m.group(1)) if m else None
 
+        def sel(name):
+            m = re.search(rf"name='{name}'.*?<option value='(\d)' selected", html, re.S)
+            return int(m.group(1)) if m else None
+
+        # How the sensor computes cloud cover; kept with each record for calibration.
+        method, region, edge = sel("cloudMethod"), sel("cloudPxRgn"), num("cloudEdge")
+        self._cloud_cache = {
+            "method": {0: "mean", 1: "pixel"}.get(method),
+            "region": {0: "center", 1: "full"}.get(region),
+            "edge_exclude": None if edge is None else int(edge),
+            "clear_delta": num("cloudClear"),
+            "overcast_delta": num("cloudOvercast"),
+        }
+
         mode_m = re.search(r"name='heatMode'.*?<option value='(\d)' selected", html, re.S)
         scale = {
             "mode": "fixed" if (mode_m and mode_m.group(1) == "1") else "floating",
@@ -124,3 +140,8 @@ class SensorClient:
             raise ValueError(f"could not parse colour scale from sensor /setup: {scale}")
         self._scale_cache, self._scale_time = scale, now
         return scale
+
+    def cloud_config(self):
+        """The sensor's cloud-cover settings as of the last /setup read (refreshed
+        with the colour scale), or None if it hasn't been read yet."""
+        return self._cloud_cache
