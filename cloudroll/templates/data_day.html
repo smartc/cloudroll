@@ -36,7 +36,8 @@
     <div class="card"><h2>Observatory</h2><div class="legend" id="leg-obs"></div><div class="chart" id="c-obs" data-h="{{ 32 + 14 * obs_rows|length }}"></div></div>
     {% endif %}
     <div class="card"><h2>Temperature (°C)</h2><div class="legend" id="leg-temp"></div><div class="chart" id="c-temp" data-h="220"></div></div>
-    <div class="card"><h2>Cloud Cover (%)</h2><div class="chart" id="c-cloud" data-h="150"></div></div>
+    <div class="card"><h2>Cloud Cover (%)</h2>{% if recalc %}<div class="legend" id="leg-cloud"></div>{% endif %}<div class="chart" id="c-cloud" data-h="150"></div>
+      {% if recalc %}<p class="muted chart-note">{{ recalc.label }}: the sensor's algorithm replayed from the stored frames with Clear Δ {{ recalc.clear_delta }} / Overcast Δ {{ recalc.overcast_delta }}{% if recalc.amb_slope %}, both shifted by {{ recalc.amb_slope }} × (ambient − {{ recalc.amb_ref }} °C){% endif %}.</p>{% endif %}</div>
     {% if has_stars %}<div class="card"><h2>Allsky Star Count</h2><div class="chart" id="c-stars" data-h="150"></div></div>{% endif %}
     <div class="card"><h2>Sky Brightness (lux, log scale)</h2><div class="chart" id="c-lux" data-h="150"></div></div>
     <div class="card"><h2>Sky Quality (mag/arcsec²)</h2><div class="chart" id="c-sqm" data-h="150"></div></div>
@@ -208,6 +209,7 @@ DataView.init({
   onSelect: showCams,
   obs: {{ obs_rows|tojson }},
   stars: {{ has_stars|tojson }},
+  recalc: {{ (recalc.label if recalc else None)|tojson }},
   night: {{ night|tojson }},
   latestUrl: {{ (url_for('data_latest') if day != latest_day else None)|tojson }},
 });

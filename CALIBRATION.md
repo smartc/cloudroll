@@ -124,6 +124,35 @@ you have labelled is always kept.
   Label each one (clear, thin, partly, overcast, unusable) and add a note. Labels save at
   once to `labels.json` and are summarised against the sensor's cloud %.
 
+## Recalculated cloud cover
+
+Fixed thresholds can't serve both a cold night and a warm afternoon. On 2026-10-16 (21 °C,
+RH 19 %) an overcast sky had Δ 27.5, which reads as clear with Clear Δ 26, while clear
+afternoons at 20 °C have Δ 37–40. A fit over clear nights and clear afternoons (ambient
+−3 … 22 °C) gives clear-sky Δ ≈ 26.8 + 0.58 × ambient.
+
+With `cloud_recalc.enabled`, the Data page's Cloud Cover chart and record panel also show a
+**Recalculated** cloud cover, and the CSV gets a `cloud_cover_recalc` column. It is the
+sensor's per-pixel algorithm, replayed from each stored frame with both thresholds shifted by
+`amb_slope × (ambient − amb_ref)`: the same correction proposed for the firmware in
+[SkyConditions_90640#9](https://github.com/smartc/SkyConditions_90640/issues/9). With
+`amb_slope` 0 it reproduces the sensor's own reading (to within ~0.1 %). Stored readings are
+never changed; the line is computed when the page loads, so it covers every day with
+frames and follows any change to the settings.
+
+The Calibration page's what-if takes the same **ambient slope** and reference. The
+**Recalculated model** button loads the `cloud_recalc` settings, so tunings can be compared
+before they go into the firmware.
+
+```json
+"cloud_recalc": {"enabled": true, "label": "Recalculated", "clear_delta": 26, "overcast_delta": 16,
+                 "amb_slope": 0.58, "amb_ref": 0, "method": "pixel", "region": "full", "edge_exclude": 3}
+```
+
+Limits: thin high cloud is partly transparent in the IR and still reads low, and the BME280
+reads several °C high in morning sun (vs the weather station), which makes daytime skies
+look clearer than they are.
+
 ## Revisiting the calibration
 
 1. Once a month or so, or when the By month table shows ⚠, open **Calibration** with the

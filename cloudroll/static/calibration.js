@@ -102,6 +102,18 @@
     return sum / (n - 1) * 100;
   }
 
+  // What-if cloud % for one minute: thresholds shifted by slope × (ambient − ref).
+  function wi() {
+    return { c: +$('w-clear').value, o: +$('w-over').value, k: +$('w-slope').value || 0, ref: +$('w-ref').value || 0 };
+  }
+  function cloudAt(dq, amb, p) {
+    const off = p.k && amb !== null && amb !== undefined ? p.k * (amb - p.ref) : 0;
+    return cloudOf(dq, p.c + off, p.o + off);
+  }
+  function wiName(p) {
+    return `${fmt(p.c, 1)} / ${fmt(p.o, 1)}` + (p.k ? ` + ${p.k} × (T − ${p.ref})` : '');
+  }
+
   const median = a => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
   const pct = (a, p) => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(p / 100 * b.length))]; };
   const fmt = (v, d = 0, u = '') => v === null || v === undefined || !isFinite(v) ? '--' : v.toFixed(d) + u;
@@ -127,17 +139,17 @@
   }
 
   function whatIf(clearIdx, overIdx, cloudyAt) {
-    const c = +$('w-clear').value, o = +$('w-over').value;
+    const p = wi(), c = p.c, o = p.o;
     const ok = c - o > 0.01;
     $('w-msg').textContent = ok ? '' : 'Clear Δ must be larger than Overcast Δ.';
-    const W = ok ? M.dq.map(q => cloudOf(q, c, o)) : M.dq.map(() => null);
+    const W = ok ? M.dq.map((q, i) => cloudAt(q, M.ambient[i], p)) : M.dq.map(() => null);
     const tbl = $('w-table');
     const row = (cells, head) => {
       const tr = document.createElement('tr');
       cells.forEach((v, k) => { const e = document.createElement(head || k === 0 ? 'th' : 'td'); e.textContent = v; if (k) e.className = 'num'; tr.appendChild(e); });
       return tr;
     };
-    const rows = [row(['', 'Minutes', 'Reported cloud (median)', `What-if ${fmt(c, 1)} / ${fmt(o, 1)} (median)`], true)];
+    const rows = [row(['', 'Minutes', 'Reported cloud (median)', `What-if ${wiName(p)} (median)`], true)];
     BANDS.forEach((b, k) => {
       const idx = M.band.map((v, i) => v === k ? i : -1).filter(i => i >= 0);
       const tr = row([bandLabel(k), idx.length, fmt(median(idx.map(i => M.cloud[i]).filter(v => v !== null)), 0, ' %'),
@@ -160,6 +172,13 @@
     const n = M.t.length;
     $('w-clear').value = CAL.current?.clear ?? (n ? M.clear_delta[n - 1] : null) ?? 26;
     $('w-over').value = CAL.current?.overcast ?? (n ? M.overcast_delta[n - 1] : null) ?? 16;
+    $('w-slope').value = 0; $('w-ref').value = 0;
+  }
+
+  function useRecalc() {
+    const r = CAL.recalc; if (!r) return;
+    $('w-clear').value = r.clear_delta; $('w-over').value = r.overcast_delta;
+    $('w-slope').value = r.amb_slope; $('w-ref').value = r.amb_ref;
   }
 
   // Grid search: thresholds whose replay best matches the star count's clear
@@ -171,14 +190,16 @@
     const use = idx.filter((_, k) => k % step === 0);
     const target = use.map(i => Math.max(0, Math.min(1, 1 - M.stars[i] / CAL.clearStars)) * 100);
     let best = null;
+    const k0 = wi().k, ref = wi().ref;
+    const off = use.map(i => k0 * (M.ambient[i] - ref));
     for (let c = 16; c <= 36; c += 0.5) for (let o = 0; o <= c - 4; o += 0.5) {
       let err = 0;
-      for (let k = 0; k < use.length; k++) err += Math.abs(cloudOf(M.dq[use[k]], c, o) - target[k]);
+      for (let k = 0; k < use.length; k++) err += Math.abs(cloudOf(M.dq[use[k]], c + off[k], o + off[k]) - target[k]);
       err /= use.length;
       if (!best || err < best.err) best = { c, o, err };
     }
     $('w-clear').value = best.c; $('w-over').value = best.o;
-    $('w-msg').textContent = `Best fit ${best.c} / ${best.o} (mean error ${best.err.toFixed(1)} % vs the star estimate, ${use.length} minutes). A starting point – check it against the clear/overcast rows and the labels.`;
+    $('w-msg').textContent = `Best fit ${best.c} / ${best.o}${k0 ? ` with slope ${k0}` : ''} (mean error ${best.err.toFixed(1)} % vs the star estimate, ${use.length} minutes). A starting point – check it against the clear/overcast rows and the labels.`;
     render();
   }
 
@@ -234,7 +255,7 @@
     const ok = i => X[i] !== null && Y[i] !== null && M.band[i] >= 0;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (let i = 0; i < X.length; i++) if (ok(i)) { x0 = Math.min(x0, X[i]); x1 = Math.max(x1, X[i]); y0 = Math.min(y0, Y[i]); y1 = Math.max(y1, Y[i]); }
-    const wc = +$('w-clear').value, wo = +$('w-over').value;
+    const wp = wi(), wc = wp.c, wo = wp.o;
     const n = M.t.length, sc = n ? M.clear_delta[n - 1] : null, so = n ? M.overcast_delta[n - 1] : null;
     if (!isFinite(x0)) {
       ctx.fillStyle = C.axis; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
@@ -272,8 +293,21 @@
     };
     hline(sc, C.line, [], `Sensor Clear Δ ${sc}`, false, false);
     hline(so, C.line, [], `Sensor Overcast Δ ${so}`, false, true);
-    if (wc !== sc) hline(wc, C.whatif, [5, 4], `What-if Clear ${wc}`, true, false);
-    if (wo !== so) hline(wo, C.whatif, [5, 4], `What-if Overcast ${wo}`, true, true);
+    if (!wp.k) {
+      if (wc !== sc) hline(wc, C.whatif, [5, 4], `What-if Clear ${wc}`, true, false);
+      if (wo !== so) hline(wo, C.whatif, [5, 4], `What-if Overcast ${wo}`, true, true);
+    } else if (xKey === 'ambient') {
+      // Ambient-compensated: the thresholds are sloped lines on this axis.
+      const sline = (v, text, below) => {
+        const ya = v + wp.k * (x0 - wp.ref), yb = v + wp.k * (x1 - wp.ref);
+        ctx.strokeStyle = C.whatif; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(px(x0), py(ya)); ctx.lineTo(px(x1), py(yb)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = C.text; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText(text, P.l + cw - 4, py(yb) + (below ? 12 : -4));
+      };
+      sline(wc, `What-if Clear ${wc} + ${wp.k}×(T−${wp.ref})`, false);
+      sline(wo, `What-if Overcast ${wo} + ${wp.k}×(T−${wp.ref})`, true);
+    }
     // clear-sky fit line
     const f = fitClear();
     if (f) {
@@ -394,10 +428,10 @@
   }
 
   function labelTable(items) {
-    const c = +$('w-clear').value, o = +$('w-over').value;
+    const p = wi();
     const tbl = $('r-table');
     const head = document.createElement('tr');
-    ['Label', 'Images', 'Sensor reported (median)', `What-if ${c} / ${o} (median)`, 'Stars (median)'].forEach(h => { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); });
+    ['Label', 'Images', 'Sensor reported (median)', `What-if ${wiName(p)} (median)`, 'Stars (median)'].forEach(h => { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); });
     const rows = [head];
     for (const l of CAL.labels) {
       const its = items.filter(it => labels[key(it)]?.label === l);
@@ -405,7 +439,7 @@
       // What-if needs the minute's quantiles: find it in the night summary by time.
       const wi = its.map(it => {
         const s = all[it.night]; const t = Date.parse(it.time); const i = s.t.indexOf(t);
-        return i >= 0 && s.dq[i] ? cloudOf(s.dq[i], c, o) : null;
+        return i >= 0 && s.dq[i] ? cloudAt(s.dq[i], s.ambient[i], p) : null;
       }).filter(v => v !== null);
       const tr = document.createElement('tr');
       [l, its.length, fmt(median(its.map(it => it.cloud_cover).filter(v => v !== null)), 0, ' %'), fmt(median(wi), 0, ' %'),
@@ -448,7 +482,8 @@
   // ── wiring ─────────────────────────────────────────────────────────────
   $('f-range').onchange = load;
   for (const id of ['f-moon', 'f-clear', 'f-over']) $(id).onchange = () => flatten(shownNights());
-  for (const id of ['w-clear', 'w-over', 'w-cloudy']) $(id).oninput = render;
+  for (const id of ['w-clear', 'w-over', 'w-slope', 'w-ref', 'w-cloudy']) $(id).oninput = render;
+  if ($('w-recalc')) $('w-recalc').onclick = () => { useRecalc(); render(); };
   $('w-current').onclick = () => { useCurrent(); render(); };
   $('w-fit').onclick = () => { $('w-msg').textContent = 'Searching…'; setTimeout(bestFit, 20); };
   $('r-night').onchange = review; $('r-unlabelled').onchange = review;

@@ -60,6 +60,12 @@ DEFAULTS = {
     # Optional allsky statistics (star count, SQM, …) read from Home Assistant
     # entities and stored with each capture.  See cloudroll/skystats.py.
     "allsky_stats": {"entities": {}, "max_age_sec": 300},
+    # A second, recalculated cloud cover from the stored frames (Data page,
+    # CSV): the sensor's per-pixel algorithm with ambient-compensated thresholds.
+    # See cloudroll/cloudmodel.py.
+    "cloud_recalc": {"enabled": False, "label": "Recalculated", "clear_delta": 26.0,
+                     "overcast_delta": 16.0, "amb_slope": 0.58, "amb_ref": 0.0,
+                     "method": "pixel", "region": "full", "edge_exclude": 3},
     # Nightly calibration harvest: a standalone dataset of dark minutes (frames,
     # sensor settings, star counts, sun/moon) plus a few sampled allsky images.
     # See CALIBRATION.md.

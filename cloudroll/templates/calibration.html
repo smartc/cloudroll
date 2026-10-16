@@ -36,12 +36,15 @@
 
 <div class="card">
   <h2>What if…</h2>
-  <p class="muted">Replays the sensor's per-pixel cloud cover over the selected minutes with other thresholds (to within ~0.5 %).</p>
+  <p class="muted">Replays the sensor's per-pixel cloud cover over the selected minutes with other thresholds (to within ~0.5 %). A non-zero ambient slope shifts both thresholds with temperature – the correction proposed for the firmware.</p>
   <div class="cal-controls">
     <label>Clear Δ <input type="number" id="w-clear" step="0.5"></label>
     <label>Overcast Δ <input type="number" id="w-over" step="0.5"></label>
+    <label title="Both thresholds shift by slope × (ambient − reference). 0 = the sensor's fixed thresholds.">Ambient slope <input type="number" id="w-slope" value="0" step="0.02"></label>
+    <label title="Ambient temperature at which the thresholds are as entered">at <input type="number" id="w-ref" value="0" step="1"> °C</label>
     <label>Cloudy at ≥ <input type="number" id="w-cloudy" value="20" min="1" max="99" step="5"> %</label>
     <button type="button" class="tbtn" id="w-current">Current settings</button>
+    {% if recalc %}<button type="button" class="tbtn" id="w-recalc" title="The model behind the Data page's {{ recalc.label }} line (config cloud_recalc)">{{ recalc.label }} model</button>{% endif %}
     <button type="button" class="tbtn" id="w-fit" title="Grid search for the Clear/Overcast pair that best matches the star counts">Best fit</button>
     <span id="w-msg" class="muted" role="status"></span>
   </div>
@@ -113,6 +116,7 @@ const CAL = {
   nightsUrl: {{ url_for('api_calibration_nights')|tojson }},
   downloadBase: {{ url_for('media_calibration_night', day='0000-00-00')[:-19]|tojson }},
   current: {{ ({'clear': scale.clear_delta, 'overcast': scale.overcast_delta} if scale else None)|tojson }},
+  recalc: {{ recalc|tojson }},
 };
 </script>
 <script src="{{ static_url('calibration.js') }}"></script>

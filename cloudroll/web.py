@@ -15,6 +15,7 @@ from PIL import Image
 from . import __version__
 from .render import thermal_with_scale
 from .calibration import LABELS
+from .cloudmodel import CloudModel
 from .skystats import fresh_value
 from .store import SCALAR_FIELDS, stamp_to_datetime
 from .sun import night_events, window_bounds, window_date_for
@@ -56,6 +57,8 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
     allsky_keys = [k for k in (cfg.get("allsky_stats") or {}).get("entities") or {}]
     allsky_max_age = (cfg.get("allsky_stats") or {}).get("max_age_sec", 300)
     has_stars = "stars" in allsky_keys
+    model = CloudModel(cfg)
+    recalc = model.params() if model.enabled else None
     ASTRO_KEYS = ["sun_alt", "moon_alt", "moon_illum"]
     labels = {s["name"]: s.get("label") or s["name"].title() for s in cfg["sources"]}
     layouts = [{"name": n, "label": labels[n]} for n in cfg["layouts"]]
@@ -210,7 +213,7 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
         days = sorted(store.readings_days())
         i = days.index(day)
         return render_template("data_day.html", day=day, s=summary,
-                               night=night_info(day), has_stars=has_stars,
+                               night=night_info(day), has_stars=has_stars, recalc=recalc,
                                latest_day=days[-1],
                                prev_day=days[i - 1] if i > 0 else None,
                                next_day=days[i + 1] if i < len(days) - 1 else None,
@@ -310,6 +313,7 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
                "latest_day": store.readings_days()[0],
                "t": [], "grid": [], "frame": [], **{k: [] for k in SCALAR_FIELDS},
                **({"stars": []} if has_stars else {}),
+               **({"cloud_recalc": []} if recalc else {}),
                **{f"src_{n}": [] for n in labels},
                **{row["key"]: [] for row in obs_rows},
                **{row["detail"]: [] for row in obs_rows if row.get("detail")}}
@@ -331,6 +335,8 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
             r = rec.get("readings", {})
             for k in SCALAR_FIELDS:
                 out[k].append(r.get(k))
+            if recalc:
+                out["cloud_recalc"].append(model.cover(rec.get("pixels"), rec.get("ambient")))
             if has_stars:
                 v = fresh_value(rec.get("allsky"), "stars", allsky_max_age)
                 if v is None and "allsky" not in rec:
@@ -390,12 +396,15 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
             w = csv.writer(buf)
             obs_cols = (["roof"] + [f"{n}_{c}" for n in rig_labels for c, _ in RIG_CSV]
                         if obs_rows else [])
-            w.writerow(["time"] + SCALAR_FIELDS + [f"allsky_{k}" for k in allsky_keys] +
+            w.writerow(["time"] + SCALAR_FIELDS + (["cloud_cover_recalc"] if recalc else []) +
+                       [f"allsky_{k}" for k in allsky_keys] +
                        ASTRO_KEYS + obs_cols +
                        (["frame_ambient", "frame_sky"] + grid_cols if grid else []))
             for rec in store.iter_readings(day):
                 r = rec.get("readings", {})
                 row = [rec["time"]] + ["" if r.get(k) is None else r[k] for k in SCALAR_FIELDS]
+                if recalc:
+                    row.append(_blank(model.cover(rec.get("pixels"), rec.get("ambient"))))
                 a = rec.get("allsky") or {}
                 row += [_blank(a.get(k)) for k in allsky_keys]
                 row += [_blank((rec.get("astro") or {}).get(k)) for k in ASTRO_KEYS]
@@ -452,7 +461,7 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
                                sun_below=calibration.sun_below,
                                clear_stars=calibration.clear_stars,
                                labels_list=list(LABELS),
-                               allsky=calibration.allsky_source,
+                               allsky=calibration.allsky_source, recalc=recalc,
                                scale=worker.color_scale() if worker else None)
 
     @app.route("/api/calibration/nights.json")

@@ -38,6 +38,7 @@ const DataView = (() => {
     ['raining', 'Rain', v => v ? 'Raining' : 'Dry'],
   ];
   const STARS_ROW = ['stars', 'Allsky Stars', v => v.toFixed(0)];
+  const RECALC_COLOR = '#fd79a8';
   // Night shading: sunset→sunrise, darker during astronomical darkness.
   const NIGHT = 'rgba(0, 0, 0, 0.16)', DARK = 'rgba(0, 0, 0, 0.30)';
   const TAP_KEY = 'cloudroll.chartTaps';
@@ -345,7 +346,12 @@ const DataView = (() => {
     if (cfg.onSelect) cfg.onSelect(i, D);
   }
 
-  function rows() { return cfg.stars ? [...ROWS.slice(0, 3), STARS_ROW, ...ROWS.slice(3)] : ROWS; }
+  function rows() {
+    const r = [...ROWS];
+    if (cfg.recalc) r.splice(1, 0, ['cloud_recalc', 'Cloud (' + cfg.recalc.toLowerCase() + ')', v => v.toFixed(0) + ' %']);
+    if (cfg.stars) r.splice(cfg.recalc ? 4 : 3, 0, STARS_ROW);
+    return r;
+  }
 
   function buildTable(force) {
     const ROWS = rows();
@@ -398,6 +404,13 @@ const DataView = (() => {
       ? (v, i) => { const d = (D[row.detail] || [])[i]; return d ? `${v} (${d})` : v; }
       : v => v]);
     fmtTime = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: cfg.tz });
+    if (cfg.recalc) {
+      // Reported and recalculated cloud cover on one chart (same unit and scale).
+      const cloud = CHARTS.find(c => c.id === 'c-cloud');
+      cloud.series = [{ key: 'cloud_cover', label: 'Sensor', color: '#dfe6e9' },
+                      { key: 'cloud_recalc', label: cfg.recalc, color: RECALC_COLOR }];
+      legend('leg-cloud', cloud.series.map(s => [s.color, s.label]));
+    }
     legend('leg-temp', CHARTS[0].series.map(s => [s.color, s.label]));
     legend('leg-rain', [[C.dry, 'Dry', true], [C.wet, 'Raining', true]]);
     D = await (await fetch(cfg.seriesUrl)).json();
