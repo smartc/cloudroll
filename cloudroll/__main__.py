@@ -12,6 +12,9 @@
                                      (default: every finished night not yet harvested);
                                      --history uses a saved HA history export for nights
                                      HA no longer has (see CALIBRATION.md)
+  python -m cloudroll lensfit FRAME [--time ISO] [--anchor HIP:x,y …]
+                                     fit the allsky lens model from a clear-night frame
+                                     (a file, or a stored frame's UTC stamp); see LENS.md
 """
 
 import argparse
@@ -46,6 +49,14 @@ def main():
     c.add_argument("--all", action="store_true", help="re-harvest every night with readings")
     c.add_argument("--history", help="saved HA /api/history JSON (.json or .json.gz)")
     c.add_argument("--force", action="store_true", help="also harvest a window still open")
+    lf = sub.add_parser("lensfit")
+    lf.add_argument("frame", help="image file, or the UTC stamp of a stored allsky frame")
+    lf.add_argument("--time", help="mid-exposure time, ISO (default: from the capture record)")
+    lf.add_argument("--anchor", action="append", help="HIP:x,y seed star (repeatable)")
+    lf.add_argument("--maglim", type=float, default=5.5, help="faintest catalogue magnitude")
+    lf.add_argument("--pressure", type=float, default=900, help="station pressure, hPa (refraction)")
+    lf.add_argument("--lat", type=float, help="camera latitude (default: lens.lat or location)")
+    lf.add_argument("--lon", type=float, help="camera longitude")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
@@ -126,6 +137,12 @@ def main():
                 print(f"{day}: {h['minutes']} dark minutes, {h['with_stars']} with stars, "
                       f"{len(h['images'])} images, history {h['history_source']}"
                       + (f"  ({'; '.join(h['notes'])})" if h["notes"] else ""))
+    elif args.cmd == "lensfit":
+        from .lensfit import run as lensfit
+        try:
+            lensfit(cfg, loc, store, args)
+        except ValueError as e:
+            raise SystemExit(str(e))
     elif args.cmd == "run":
         from waitress import serve
         from .web import create_app

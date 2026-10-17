@@ -45,6 +45,8 @@ data/timelapses/<date>.<layout>.mp4   further layouts of the same day, with thei
 data/timelapses/<date>[.<layout>].run.mp4/.jpg  the night's imaging run, cut from that day video
 data/settings.json                    runtime settings changed from the web UI
 data/calibration/                     calibration dataset: night files, sampled images, labels (CALIBRATION.md)
+data/lensfit/<stamp>.lens.json/.check.jpg  lens fits and their check images (LENS.md)
+data/skydata/                         star catalogue and ephemeris for lensfit (downloaded on first use)
 ```
 
 Each readings record looks like
@@ -89,8 +91,9 @@ cp config.example.json config.json      # then set sensor.host and location
 
 Other commands: `capture` (one frame), `build [YYYY-MM-DD] [--layout NAME|both]` (rebuild a
 day's timelapse; while its frames are kept, in any layout), `calibrate [DATE …|--all]
-[--history FILE]` (harvest calibration nights by hand; see CALIBRATION.md). `info` also
-test-fetches each image source.
+[--history FILE]` (harvest calibration nights by hand; see CALIBRATION.md), `lensfit FRAME`
+(fit the allsky lens model from a clear-night frame; needs `requirements-lensfit.txt`, see
+LENS.md). `info` also test-fetches each image source.
 
 To run at boot behind an Apache HTTPS proxy:
 
@@ -272,7 +275,7 @@ roof is `unknown` and no markers are drawn.
 | `rigs[].focal_length_mm`, `sensor` | Field of view (defaults: 1000 mm, ASI2600 6248×4176 at 3.76 µm) |
 | `rigs[].color` | Marker colour |
 | `rigs[].rotation_offset_deg`, `flip` | Match the rotator angle to the sky: the sensor's long side is drawn perpendicular to `Position + offset` (east of north), mirrored with `flip` |
-| `lens` | Fisheye model of the allsky camera: centre `cx`/`cy`, north rotation `rot_deg`, radius r = k1·z + k2·z³ + k3·z⁵ (pixels, zenith angle z in radians) at the original image's `width`×`height`; `lat`/`lon` override the location for the RA/Dec → alt/az conversion. Without a lens, only the status is shown |
+| `lens` | Fisheye model of the allsky camera: centre `cx`/`cy`, north rotation `rot_deg`, radius r = k1·z + k2·z³ + k3·z⁵ (pixels, zenith angle z in radians) at the original image's `width`×`height`; `lat`/`lon` override the location for the RA/Dec → alt/az conversion. Fit it with `python -m cloudroll lensfit` (LENS.md). Without a lens, only the status is shown |
 | `timeout_sec` | Per-request timeout; an unreachable device only costs this once per capture |
 
 `python -m cloudroll info` prints the current roof and rig status – a quick check
@@ -320,8 +323,9 @@ The card reads `/api/info` (days, cameras, time zone) and the same
 
 * **Star count on the Home Assistant card** – the card builds its charts before it knows
   whether a site records star counts; it needs `/api/info` to say so first.
-* **Lens calibration tool** – fit the allsky `lens` model from a clear-night frame by
-  matching stars to a catalogue (currently a separate script).
+* **Lens calibration, next steps** – pick the best clear frame automatically from the
+  calibration data, a camera-tilt term, crop-aware sources, and reading indi-allsky's own
+  solved lens geometry (see LENS.md).
 * **Telescope markers on the Home Assistant card** – draw them from the records'
   `observatory` field over the original allsky images.
 * **Web setup page** – configure the observatory from the browser instead of
