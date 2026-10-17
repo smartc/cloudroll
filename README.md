@@ -328,9 +328,15 @@ The card reads `/api/info` (days, cameras, time zone) and the same
   solved lens geometry (see LENS.md).
 * **Telescope markers on the Home Assistant card** – draw them from the records'
   `observatory` field over the original allsky images.
-* **Web setup page** – configure the observatory from the browser instead of
-  config.json: NINA instances, piers / park sensors and the roof, with a read-only
-  "test connection" for each.
+* **Config page** – set everything from the browser instead of editing config.json:
+  - sensor, location, image sources and layouts, retention and timelapse
+  - star-count entities, calibration and the recalculated cloud cover
+  - the observatory: NINA instances, piers / park sensors and the roof
+  - the allsky lens model, with a button that runs the lens fit and applies the result
+
+  Each device gets a read-only "test connection". The page validates with the same
+  checks as config.json, says which changes need a restart, and keeps config.json as
+  the fallback. Tokens stay in their files and are never shown.
 * **Any number of rigs in the setup** – add and remove rigs freely (the config already
   takes a list; markers cycle 4 default colours and spread up to 4 overlapping labels).
 * **Interlock warning** – highlight the roof moving while any pier reads unparked,
