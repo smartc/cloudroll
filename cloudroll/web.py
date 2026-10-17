@@ -213,7 +213,7 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
         days = sorted(store.readings_days())
         i = days.index(day)
         return render_template("data_day.html", day=day, s=summary,
-                               night=night_info(day), has_stars=has_stars, recalc=recalc,
+                               night=night_info(day), has_stars=has_stars,
                                latest_day=days[-1],
                                prev_day=days[i - 1] if i > 0 else None,
                                next_day=days[i + 1] if i < len(days) - 1 else None,
@@ -313,7 +313,6 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
                "latest_day": store.readings_days()[0],
                "t": [], "grid": [], "frame": [], **{k: [] for k in SCALAR_FIELDS},
                **({"stars": []} if has_stars else {}),
-               **({"cloud_recalc": []} if recalc else {}),
                **{f"src_{n}": [] for n in labels},
                **{row["key"]: [] for row in obs_rows},
                **{row["detail"]: [] for row in obs_rows if row.get("detail")}}
@@ -335,8 +334,6 @@ def create_app(cfg, loc, store, worker, sensor, settings, calibration=None):
             r = rec.get("readings", {})
             for k in SCALAR_FIELDS:
                 out[k].append(r.get(k))
-            if recalc:
-                out["cloud_recalc"].append(model.cover(rec.get("pixels"), rec.get("ambient")))
             if has_stars:
                 v = fresh_value(rec.get("allsky"), "stars", allsky_max_age)
                 if v is None and "allsky" not in rec:

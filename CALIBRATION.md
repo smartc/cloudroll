@@ -18,9 +18,12 @@ gain, moon mode, dew heater level, smoke rating).
 The first calibration (October 2026, one week) found clear skies at Δ 25–32 °C. The
 sensor was set to Clear Δ 30, which read clear skies as ~21 % cloud on median and ≥ 20 %
 for more than half of all clear minutes. It was changed to **Clear Δ 26 / Overcast Δ 16**.
-Clear-sky Δ also moved with ambient temperature (and humidity), so fixed thresholds will
-need re-checking as winter brings colder nights. Firmware ideas are filed as
-[SkyConditions_90640#9](https://github.com/smartc/SkyConditions_90640/issues/9).
+Clear-sky Δ also moves with ambient temperature: a warm overcast afternoon can have the Δ
+of a cold clear night. Firmware from 2026-10-16
+([SkyConditions_90640#9](https://github.com/smartc/SkyConditions_90640/issues/9)) shifts
+both thresholds by **0.58 × ambient** (reference 0 °C), smooths the ambient over 120 s and
+reports the median over `AveragePeriod` (30 s). The slope was fitted over −3 … 22 °C, so
+re-check it as winter brings colder nights.
 
 ## What CloudRoll records
 
@@ -131,14 +134,14 @@ RH 19 %) an overcast sky had Δ 27.5, which reads as clear with Clear Δ 26, whi
 afternoons at 20 °C have Δ 37–40. A fit over clear nights and clear afternoons (ambient
 −3 … 22 °C) gives clear-sky Δ ≈ 26.8 + 0.58 × ambient.
 
-With `cloud_recalc.enabled`, the Data page's Cloud Cover chart and record panel also show a
-**Recalculated** cloud cover, and the CSV gets a `cloud_cover_recalc` column. It is the
+With `cloud_recalc.enabled`, the CSV gets a `cloud_cover_recalc` column (the Data page shows
+only the sensor's own reading). It is the
 sensor's per-pixel algorithm, replayed from each stored frame with both thresholds shifted by
-`amb_slope × (ambient − amb_ref)`: the same correction proposed for the firmware in
-[SkyConditions_90640#9](https://github.com/smartc/SkyConditions_90640/issues/9). With
+`amb_slope × (ambient − amb_ref)`, the same correction the firmware now applies. It is
+mainly useful for replaying days recorded before that firmware, or for trying a new slope. With
 `amb_slope` 0 it reproduces the sensor's own reading (to within ~0.1 %). Stored readings are
-never changed; the line is computed when the page loads, so it covers every day with
-frames and follows any change to the settings.
+never changed; the column is computed on download, so it covers every day with frames
+and follows any change to the settings.
 
 The Calibration page's what-if takes the same **ambient slope** and reference. The
 **Recalculated model** button loads the `cloud_recalc` settings, so tunings can be compared

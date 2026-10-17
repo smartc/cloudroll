@@ -36,7 +36,7 @@
 
 <div class="card">
   <h2>What if…</h2>
-  <p class="muted">Replays the sensor's per-pixel cloud cover over the selected minutes with other thresholds (to within ~0.5 %). A non-zero ambient slope shifts both thresholds with temperature – the correction proposed for the firmware.</p>
+  <p class="muted">Replays the sensor's per-pixel cloud cover over the selected minutes with other thresholds (to within ~0.5 %). A non-zero ambient slope shifts both thresholds by slope × (ambient − reference), as the sensor's firmware does.</p>
   <div class="cal-controls">
     <label>Clear Δ <input type="number" id="w-clear" step="0.5"></label>
     <label>Overcast Δ <input type="number" id="w-over" step="0.5"></label>
@@ -44,7 +44,7 @@
     <label title="Ambient temperature at which the thresholds are as entered">at <input type="number" id="w-ref" value="0" step="1"> °C</label>
     <label>Cloudy at ≥ <input type="number" id="w-cloudy" value="20" min="1" max="99" step="5"> %</label>
     <button type="button" class="tbtn" id="w-current">Current settings</button>
-    {% if recalc %}<button type="button" class="tbtn" id="w-recalc" title="The model behind the Data page's {{ recalc.label }} line (config cloud_recalc)">{{ recalc.label }} model</button>{% endif %}
+    {% if recalc %}<button type="button" class="tbtn" id="w-recalc" title="The thresholds in config cloud_recalc">{{ recalc.label }} model</button>{% endif %}
     <button type="button" class="tbtn" id="w-fit" title="Grid search for the Clear/Overcast pair that best matches the star counts">Best fit</button>
     <span id="w-msg" class="muted" role="status"></span>
   </div>
@@ -61,7 +61,7 @@
   <div class="legend" id="sc-legend"></div>
   <div class="chart" id="sc" data-h="380"></div>
   <p class="muted" id="sc-fit"></p>
-  <p class="muted">Each dot is one dark minute: the median Δ over the sensor's cloud region, coloured by the allsky star count. Horizontal lines are the sensor's thresholds (solid) and the what-if pair (dashed). The sloped line is a straight-line fit through the clear minutes: if clear skies drift away from the solid Clear Δ line as the season changes, it's time to re-tune.</p>
+  <p class="muted">Each dot is one dark minute: the median Δ over the sensor's cloud region, coloured by the allsky star count. The lines are the sensor's thresholds (solid) and the what-if pair (dashed); they slope when an ambient slope is set. The pink line is a straight-line fit through the clear minutes: if clear skies drift away from the solid Clear Δ line as the season changes, it's time to re-tune.</p>
 </div>
 
 <div class="card">

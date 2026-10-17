@@ -60,7 +60,7 @@ DEFAULTS = {
     # Optional allsky statistics (star count, SQM, …) read from Home Assistant
     # entities and stored with each capture.  See cloudroll/skystats.py.
     "allsky_stats": {"entities": {}, "max_age_sec": 300},
-    # A second, recalculated cloud cover from the stored frames (Data page,
+    # A recalculated cloud cover from the stored frames (Calibration what-if,
     # CSV): the sensor's per-pixel algorithm with ambient-compensated thresholds.
     # See cloudroll/cloudmodel.py.
     "cloud_recalc": {"enabled": False, "label": "Recalculated", "clear_delta": 26.0,

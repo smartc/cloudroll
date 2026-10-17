@@ -129,7 +129,7 @@ Copied from `config.example.json`; it holds your site's details and is not track
 | `source_timeout_sec` | Per-fetch timeout for image sources |
 | `observatory` | Optional roof and telescope status, and pointing markers on the allsky image – see below |
 | `allsky_stats` | Optional HA entities from the allsky camera (star count, SQM, …) recorded with each capture – see CALIBRATION.md |
-| `cloud_recalc` | Optional second cloud-cover line on the Data page and `cloud_cover_recalc` CSV column: the sensor's algorithm replayed from the stored frames with ambient-compensated thresholds (`clear_delta`, `overcast_delta`, `amb_slope`, `amb_ref`) – see CALIBRATION.md |
+| `cloud_recalc` | Optional recalculated cloud cover for the Calibration page's what-if and a `cloud_cover_recalc` CSV column: the sensor's algorithm replayed from the stored frames with ambient-compensated thresholds (`clear_delta`, `overcast_delta`, `amb_slope`, `amb_ref`) – see CALIBRATION.md |
 | `calibration` | Nightly calibration harvest: dark-minute threshold, images per night, … – see CALIBRATION.md |
 
 ## Image sources
